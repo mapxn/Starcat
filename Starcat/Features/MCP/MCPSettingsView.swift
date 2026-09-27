@@ -15,6 +15,7 @@ struct MCPSettingsTab: View {
     @Environment(AppSettings.self) private var settings
     @Environment(AppDependencies.self) private var dependencies
     @Environment(EntitlementGate.self) private var entitlementGate
+    @Environment(\.locale) private var locale
 
     /// 端口输入草稿：编辑期不钳制、不写盘，避免全选替换被 binding setter 打断。
     /// 点「重启」或离开字段时再 `commitPortDraft()`。
@@ -272,6 +273,9 @@ struct MCPSettingsTab: View {
                                 Text("\(device.platform) / \(device.architecture) · \(device.cliVersion)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                Text(pairedAtText(for: device))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 16)
                             Button("settings.mcp.devices.revoke", role: .destructive) {
@@ -346,6 +350,24 @@ struct MCPSettingsTab: View {
     private func isRunning(_ state: StarcatMCPService.State) -> Bool {
         if case .running = state { return true }
         return false
+    }
+
+    /// 使用绝对日期时间帮助用户稳定区分新旧配对；配对较早不等于凭据已失效，
+    /// 因此这里只展示事实时间，不派生容易误导的 stale 状态。
+    private func pairedAtText(for device: StarcatMCPPairedDevice) -> String {
+        let timestamp = device.pairedAt.formatted(
+            .dateTime
+                .year()
+                .month(.abbreviated)
+                .day()
+                .hour()
+                .minute()
+                .locale(locale)
+        )
+        return String(
+            format: String.l10n("settings.mcp.devices.pairedAtFormat"),
+            timestamp
+        )
     }
 
     /// 设置页动作保持“说明在左、独立按钮在右”的统一密度；复制状态与剪贴板写入由

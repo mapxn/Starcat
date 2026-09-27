@@ -358301,6 +358301,23 @@
         }
       }
     },
+    "settings.mcp.devices.pairedAtFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paired on %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配对时间：%@"
+          }
+        }
+      }
+    },
     "settings.mcp.devices.revoke" : {
       "extractionState" : "manual",
       "localizations" : {
