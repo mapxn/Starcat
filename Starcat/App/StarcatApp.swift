@@ -362,6 +362,9 @@ struct StarcatApp: App {
             await updateController.checkAutomaticallyIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // 另一渠道可能在本 App 非活跃期间安装或删除共享模型；回到前台时刷新
+            // manifest 快照与内置 profile，不依赖跨进程通知常驻唤醒应用。
+            LocalAIModelManager.shared.refreshFromSharedStorage()
             Task {
                 await updateController.checkAutomaticallyIfNeeded()
             }

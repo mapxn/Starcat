@@ -24,6 +24,8 @@
     <key>com.apple.security.application-groups</key>
     <array>
         <string>group.com.starcat.app.store.widgets</string>
+        <!-- 仅主 App 使用：与 Direct 共用本地 AI 模型文件。 -->
+        <string>8WCUMGCWMB.com.starcat.app.localai</string>
     </array>
 
     <!-- 用户主动选择文件读写：JSON 导入导出场景 -->

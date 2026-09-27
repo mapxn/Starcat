@@ -37,6 +37,10 @@ enum LocalAIInstallState: Equatable, Sendable {
     case loading
     /// 容器加载失败（如 mxfp8 在老芯片上不受支持）：文件已装好，可单独重试加载。
     case loadFailed(message: String)
+    /// 正等待本进程 / 另一渠道释放模型文件，或正在删除目录。
+    case deleting
+    /// 删除失败时模型仍保留，可由用户再次删除。
+    case deleteFailed(message: String)
     case installed
 
     var isInstalled: Bool {
@@ -96,6 +100,8 @@ final class LocalAIModelManager {
     private(set) var installedModels: [LocalAIInstalledModel] = []
     /// 是否正在同步内置 profile（避免重入）。
     private var isSyncingProfile = false
+    /// 升级迁移完成前保留上次 profile，避免扫描共享目录为空时把已安装模型短暂清空。
+    private var isSharedStoragePrepared = false
 
     private let downloader = LocalAIModelDownloader()
     /// catalog id -> 正在进行的下载 Task，供暂停/取消。
@@ -110,9 +116,14 @@ final class LocalAIModelManager {
     /// 暂停防抖代数：pause/install 各自 +1，使飞行中的进度回调立即过期，
     /// 避免暂停后按钮在「下载 / 进度」之间抖动直到底层取消完成。
     private var installGenerations: [String: Int] = [:]
+    /// 清除全部是跨模型操作，不塞进单模型 task 字典，避免 pause 误取消一半状态。
+    private var deleteAllTask: Task<Void, Never>?
 
     private init() {
         refreshInstalledModels()
+        if !TestEnvironment.isRunning {
+            refreshFromSharedStorage()
+        }
     }
 
     // MARK: - 查询
@@ -122,7 +133,7 @@ final class LocalAIModelManager {
         // 仍在加载或加载失败——不能被「已安装」短路，否则 UI 看不到加载进度 / 失败。
         if let explicit = installStates[entryID] {
             switch explicit {
-            case .loading, .loadFailed:
+            case .loading, .loadFailed, .deleting, .deleteFailed:
                 return explicit
             default:
                 break
@@ -151,6 +162,23 @@ final class LocalAIModelManager {
 
     var totalDiskUsage: Int64 {
         LocalAIModelStorage.totalDiskUsage()
+    }
+
+    /// 启动与 App 重新激活时刷新共享目录。另一渠道可能在本进程休眠期间完成安装
+    /// 或删除，因此不能只依赖当前进程的安装回调。
+    func refreshFromSharedStorage() {
+        guard !TestEnvironment.isRunning else { return }
+        Task {
+            do {
+                try await LocalAISharedModelCoordinator.shared.prepareSharedStorageIfNeeded()
+                isSharedStoragePrepared = true
+                refreshInstalledModels()
+                syncBuiltInProfile()
+            } catch {
+                AppLog.ai.error(
+                    "Prepare shared Local AI storage failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     /// 单模型完整性检查：manifest 存在且声明的文件都在磁盘上。
@@ -268,30 +296,70 @@ final class LocalAIModelManager {
         guard let manifest = installedModel(id: entryID),
             let entry = LocalAIModelCatalog.entry(id: entryID)
         else { return }
-        let directory = try? LocalAIModelStorage.modelDirectory(
-            entry: entry, revision: manifest.revision)
-        if let directory {
-            try? LocalAIModelStorage.remove(modelDirectory: directory)
+        installStates[entryID] = .deleting
+        let task = Task {
+            do {
+                await LocalMLXRuntime.shared.unload(
+                    types: [entry.type],
+                    reason: "model_deleted")
+                let directory = try LocalAIModelStorage.modelDirectory(
+                    entry: entry,
+                    revision: manifest.revision)
+                try await LocalAISharedModelCoordinator.shared.removeModel(at: directory)
+                isSharedStoragePrepared = true
+                refreshInstalledModels()
+                installStates[entryID] = .idle
+                syncBuiltInProfile()
+            } catch is CancellationError {
+                installStates[entryID] = .installed
+            } catch {
+                installStates[entryID] = .deleteFailed(message: error.localizedDescription)
+            }
+            runningInstalls[entryID] = nil
         }
-        refreshInstalledModels()
-        syncBuiltInProfile()
+        runningInstalls[entryID] = task
     }
 
     /// 删除全部本地模型（设置页危险操作）。
     func deleteAll() {
+        guard deleteAllTask == nil else { return }
         for entry in LocalAIModelCatalog.entries {
             pause(entryID: entry.id)
         }
-        for manifest in installedModels {
-            guard let entry = LocalAIModelCatalog.entry(id: manifest.id) else { continue }
-            if let directory = try? LocalAIModelStorage.modelDirectory(
-                entry: entry, revision: manifest.revision) {
-                try? LocalAIModelStorage.remove(modelDirectory: directory)
+        let entryIDs = installedModels.map(\.id)
+        for entryID in entryIDs {
+            installStates[entryID] = .deleting
+        }
+        deleteAllTask = Task {
+            do {
+                await LocalMLXRuntime.shared.unloadAll(reason: "all_models_deleted")
+                try await LocalAISharedModelCoordinator.shared.removeAllModels()
+                isSharedStoragePrepared = true
+                refreshInstalledModels()
+                for entryID in entryIDs { installStates[entryID] = .idle }
+                syncBuiltInProfile()
+            } catch {
+                for entryID in entryIDs {
+                    installStates[entryID] = .deleteFailed(message: error.localizedDescription)
+                }
+            }
+            deleteAllTask = nil
+        }
+    }
+
+    /// 下载源变化时先取消本进程全部下载，再在全局独占锁内清理断点文件。
+    func cleanPartialDownloadsForSourceChange() {
+        for entry in LocalAIModelCatalog.entries {
+            pause(entryID: entry.id)
+        }
+        Task {
+            do {
+                try await LocalAISharedModelCoordinator.shared.cleanPartialFiles()
+            } catch {
+                AppLog.ai.error(
+                    "Clean shared Local AI partial files failed: \(error.localizedDescription, privacy: .public)")
             }
         }
-        LocalAIModelStorage.cleanPartialFiles()
-        refreshInstalledModels()
-        syncBuiltInProfile()
     }
 
     // MARK: - 内部安装流程
@@ -299,94 +367,126 @@ final class LocalAIModelManager {
     private func runInstall(
         entry: LocalAIModelCatalogEntry, source: LocalAIModelSource, generation: Int
     ) async {
+        var modelWriteLease: LocalAIModelAccessLease?
+        // 所有暂停 / 代数失效的提前 return 都必须释放跨进程独占锁。
+        defer { modelWriteLease?.release() }
         do {
+            try await LocalAISharedModelCoordinator.shared.prepareSharedStorageIfNeeded()
+            isSharedStoragePrepared = true
             let revision = try await resolveRevision(for: source)
             let directory = try LocalAIModelStorage.modelDirectory(
                 entry: entry, revision: revision)
-            var records: [LocalAIFileRecord] = []
-            let optionalFiles = Set(
-                entry.files.filter { !$0.isRequired }.map(\.name))
+            modelWriteLease = try await LocalAISharedModelCoordinator.shared
+                .acquireModelWrite(at: directory)
 
-            // 下载前从当前源取完整文件清单。只要所有必需文件都有大小，总量就是远端
-            // 真值；元数据请求失败才回退 catalog 预估，但已下载字节始终来自落盘回调，
-            // 禁止再把预估体积按文件数均分（KB 配置文件会被虚增成数百 MB）。
-            let fileSizes = await resolveFileSizes(
-                for: entry, source: source, revision: revision)
-            let knownTotal = entry.files.compactMap { fileSizes[$0.name] }.reduce(0, +)
-            let hasCompleteSizePlan = entry.files
-                .filter(\.isRequired)
-                .allSatisfy { fileSizes[$0.name] != nil }
-            let totalBytes = hasCompleteSizePlan && knownTotal > 0
-                ? knownTotal
-                : entry.estimatedDownloadSize
-            var doneBytesBefore: Int64 = 0
+            let existingManifest = try? LocalAIModelStorage.loadManifest(from: directory)
+            let isAlreadyInstalled = existingManifest.map {
+                LocalAIModelStorage.isInstallationValid(
+                    manifest: $0,
+                    directory: directory,
+                    verifyHashes: false)
+            } ?? false
 
-            for file in entry.files {
-                if Task.isCancelled {
-                    installStates[entry.id] = .idle
-                    runningInstalls[entry.id] = nil
-                    return
+            if !isAlreadyInstalled {
+                // manifest 已存在但内容不完整时不能继续拼接旧文件；无 manifest 的目录
+                // 则保留 `.part`，让正常暂停 / 续传继续生效。
+                if FileManager.default.fileExists(
+                    atPath: LocalAIModelStorage.manifestURL(in: directory).path)
+                {
+                    try FileManager.default.removeItem(at: directory)
                 }
-                // 快照进 @Sendable 闭包：循环变量 doneBytesBefore 在闭包存活期内会被改写，
-                // 直接捕获 var 在严格并发下不合法。
-                let doneBeforeSnapshot = doneBytesBefore
-                do {
-                    let record = try await downloadOne(
-                        entry: entry, source: source, revision: revision, file: file.name,
-                        directory: directory,
-                        onFileProgress: { [weak self] fileProgress in
-                            // 整体进度 = 已完成文件真实字节 + 当前文件真实落盘字节；状态机
-                            // 与速度采样都在 MainActor 上，统一 hop 过去。
-                            Task { @MainActor [weak self] in
-                                guard let self, self.installGenerations[entry.id] == generation else { return }
-                                let completed = doneBeforeSnapshot + fileProgress.completedBytes
-                                let speed = self.updateSpeedSampler(
-                                    entryID: entry.id, completedBytes: completed)
-                                let rawProgress = totalBytes > 0
-                                    ? Double(completed) / Double(totalBytes)
-                                    : 0
-                                self.installStates[entry.id] = .downloading(
-                                    // 元数据失败时 catalog 只是估值，下载阶段最多显示 99%，
-                                    // 避免真实文件略大于估值时尚未完成就提前走满。
-                                    progress: min(hasCompleteSizePlan ? 1 : 0.99, rawProgress),
-                                    completedBytes: completed,
-                                    totalBytes: totalBytes,
-                                    speedBytesPerSecond: speed)
-                            }
-                        })
-                    records.append(record)
-                    guard installGenerations[entry.id] == generation else {
-                        runningInstalls[entry.id] = nil
-                        return
-                    }
-                    doneBytesBefore += record.sizeBytes
-                } catch let error as LocalAIDownloadError {
-                    if error == .cancelled {
+
+                var records: [LocalAIFileRecord] = []
+                let optionalFiles = Set(
+                    entry.files.filter { !$0.isRequired }.map(\.name))
+
+                // 下载前从当前源取完整文件清单。只要所有必需文件都有大小，总量就是远端
+                // 真值；元数据请求失败才回退 catalog 预估，但已下载字节始终来自落盘回调，
+                // 禁止再把预估体积按文件数均分（KB 配置文件会被虚增成数百 MB）。
+                let fileSizes = await resolveFileSizes(
+                    for: entry, source: source, revision: revision)
+                let knownTotal = entry.files.compactMap { fileSizes[$0.name] }.reduce(0, +)
+                let hasCompleteSizePlan = entry.files
+                    .filter(\.isRequired)
+                    .allSatisfy { fileSizes[$0.name] != nil }
+                let totalBytes = hasCompleteSizePlan && knownTotal > 0
+                    ? knownTotal
+                    : entry.estimatedDownloadSize
+                var doneBytesBefore: Int64 = 0
+
+                for file in entry.files {
+                    if Task.isCancelled {
+                        modelWriteLease?.release()
+                        modelWriteLease = nil
                         installStates[entry.id] = .idle
-                        speedSamples[entry.id] = nil
                         runningInstalls[entry.id] = nil
                         return
                     }
-                    // 可选文件 404 / 不存在时跳过（不同 mlx-community 转换仓库文件集不一致）。
-                    if optionalFiles.contains(file.name), isNotFound(error) {
-                        continue
+                    // 快照进 @Sendable 闭包：循环变量 doneBytesBefore 在闭包存活期内会被改写，
+                    // 直接捕获 var 在严格并发下不合法。
+                    let doneBeforeSnapshot = doneBytesBefore
+                    do {
+                        let record = try await downloadOne(
+                            entry: entry, source: source, revision: revision, file: file.name,
+                            directory: directory,
+                            onFileProgress: { [weak self] fileProgress in
+                                // 整体进度 = 已完成文件真实字节 + 当前文件真实落盘字节；状态机
+                                // 与速度采样都在 MainActor 上，统一 hop 过去。
+                                Task { @MainActor [weak self] in
+                                    guard let self, self.installGenerations[entry.id] == generation else { return }
+                                    let completed = doneBeforeSnapshot + fileProgress.completedBytes
+                                    let speed = self.updateSpeedSampler(
+                                        entryID: entry.id, completedBytes: completed)
+                                    let rawProgress = totalBytes > 0
+                                        ? Double(completed) / Double(totalBytes)
+                                        : 0
+                                    self.installStates[entry.id] = .downloading(
+                                        // 元数据失败时 catalog 只是估值，下载阶段最多显示 99%，
+                                        // 避免真实文件略大于估值时尚未完成就提前走满。
+                                        progress: min(hasCompleteSizePlan ? 1 : 0.99, rawProgress),
+                                        completedBytes: completed,
+                                        totalBytes: totalBytes,
+                                        speedBytesPerSecond: speed)
+                                }
+                            })
+                        records.append(record)
+                        guard installGenerations[entry.id] == generation else {
+                            runningInstalls[entry.id] = nil
+                            return
+                        }
+                        doneBytesBefore += record.sizeBytes
+                    } catch let error as LocalAIDownloadError {
+                        if error == .cancelled {
+                            installStates[entry.id] = .idle
+                            speedSamples[entry.id] = nil
+                            runningInstalls[entry.id] = nil
+                            return
+                        }
+                        // 可选文件 404 / 不存在时跳过（不同 mlx-community 转换仓库文件集不一致）。
+                        if optionalFiles.contains(file.name), isNotFound(error) {
+                            continue
+                        }
+                        throw error
                     }
-                    throw error
                 }
-            }
-            speedSamples[entry.id] = nil
+                speedSamples[entry.id] = nil
 
-            let manifest = LocalAIInstalledModel(
-                id: entry.id,
-                displayName: entry.displayName,
-                type: entry.type,
-                revision: revision,
-                installedAt: Date(),
-                sourceKind: source.kind,
-                files: records,
-                embeddingDimension: entry.embeddingDimension,
-                totalBytes: records.reduce(0) { $0 + $1.sizeBytes })
-            try LocalAIModelStorage.save(manifest, in: directory)
+                let manifest = LocalAIInstalledModel(
+                    id: entry.id,
+                    displayName: entry.displayName,
+                    type: entry.type,
+                    revision: revision,
+                    installedAt: Date(),
+                    sourceKind: source.kind,
+                    files: records,
+                    embeddingDimension: entry.embeddingDimension,
+                    totalBytes: records.reduce(0) { $0 + $1.sizeBytes })
+                try LocalAIModelStorage.save(manifest, in: directory)
+            }
+
+            // preload 会取得共享读锁；必须先释放下载独占锁，避免同进程自锁。
+            modelWriteLease?.release()
+            modelWriteLease = nil
 
             refreshInstalledModels()
             syncBuiltInProfile()
@@ -413,9 +513,12 @@ final class LocalAIModelManager {
                 }
                 installStates[entry.id] = .loadFailed(message: error.localizedDescription)
             }
+        } catch is CancellationError {
+            modelWriteLease?.release()
+            installStates[entry.id] = .idle
         } catch {
-            installStates[entry.id] = .failed(
-                message: error.localizedDescription)
+            modelWriteLease?.release()
+            installStates[entry.id] = .failed(message: error.localizedDescription)
         }
         runningInstalls[entry.id] = nil
     }
@@ -576,6 +679,7 @@ final class LocalAIModelManager {
     ///   `resolveEmbeddingSelection` 按 `profile.models` 校验兜底。
     func syncBuiltInProfile() {
         guard !TestEnvironment.isRunning else { return }
+        guard isSharedStoragePrepared else { return }
         guard !isSyncingProfile else { return }
         isSyncingProfile = true
         defer { isSyncingProfile = false }

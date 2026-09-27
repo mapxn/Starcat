@@ -23,6 +23,13 @@ enum AppConstants {
     /// Keychain service / OSLog subsystem / 沙盒目录命名均依赖此值。
     static let bundleIdentifier = "com.starcat.app"
 
+    /// App Store 与 Direct 主应用共用的本地 AI 模型容器。
+    ///
+    /// 使用 Team ID 前缀而不是注册型 `group.*`：macOS 15+ 允许同一团队签名的
+    /// 沙盒 / 非沙盒 App 共享文件容器，且 Direct 分发无需额外 provisioning profile。
+    /// 该组只用于模型文件，不承担 Keychain Access Group。
+    static let localAIAppGroupIdentifier = "8WCUMGCWMB.com.starcat.app.localai"
+
     /// OSLog subsystem，与 `bundleIdentifier` 保持同名以便 Console.app 过滤。
     static let logSubsystem = bundleIdentifier
 

@@ -205,17 +205,22 @@ struct LocalAIModelCatalogEntry {
 ### 5.4 存储布局（机器级资源，不进 per-user 数据库）
 
 ```text
-~/Library/Application Support/<bundleId>/models/
-├── embedding/qwen3-embedding-0.6b-8bit@<revision>/
-│   ├── model.safetensors
-│   ├── config.json / tokenizer.json / ...
-│   └── manifest.json      # id/revision/sha256/size/installedAt/source
-├── reranker/...
-└── llm/...
+~/Library/Group Containers/8WCUMGCWMB.com.starcat.app.localai/
+└── Library/Application Support/Starcat/LocalAI/v1/
+    ├── locks/             # 跨进程 flock 文件，与可删除模型目录分离
+    └── models/
+        ├── embedding/qwen3-embedding-0.6b-8bit@<revision>/
+        │   ├── model.safetensors
+        │   ├── config.json / tokenizer.json / ...
+        │   └── manifest.json  # id/revision/sha256/size/installedAt/source
+        ├── reranker/...
+        └── llm/...
 ```
 
-- 路径解析走 `CacheDirectoryLocator.applicationSupportRoot()` 惯例（`urls(for: .applicationSupportDirectory,)` + `AppConstants.bundleIdentifier`），禁止硬编码 `~/Library/...`。
+- 路径通过 `FileManager.containerURL(forSecurityApplicationGroupIdentifier:)` 解析，App Store 与 Direct 主应用共用 Team ID App Group；Widget、屏保与辅助二进制不授予该组权限。
+- 旧版私有 `Application Support/com.starcat.app/models/` 在首次启动时迁移：源文件通过 manifest、大小与 SHA256 校验后才移动；共享目录已有同内容模型时删除已验证重复副本，冲突或残缺目录保留原处。
 - `manifest.json` 是安装状态单一真源；启动时扫描目录重建安装列表，容忍脏目录（无 manifest 的目录视为未完成下载，可清理）。
+- 推理持有跨进程共享锁，下载与单模型删除持有模型独占锁，迁移与全部清除持有全局独占锁；避免两个渠道同时运行时删除 mmap 权重或混写 `.part`。
 - 管理动作：单模型删除（确认弹窗）、全部清除、在 Finder 中显示；存储占用统计复用 `Core/Cache/CacheCleaner.swift` 模式。
 
 ### 5.5 `LocalMLXRuntime`（GPU 串行与内存策略）
@@ -274,7 +279,8 @@ struct LocalAIModelCatalogEntry {
 
 ### 8.3 双渠道
 
-- 模型不打进 bundle（v1.0 原则保留，吸取 `codebase.bin` 258 MiB 教训）；两渠道均为运行时下载到 Application Support 容器，App Store 沙盒（network-client 已有）与 Direct 无沙盒行为一致。
+- 模型不打进 bundle（v1.0 原则保留，吸取 `codebase.bin` 258 MiB 教训）；两渠道运行时下载到 `8WCUMGCWMB.com.starcat.app.localai` 共享容器，同一台 Mac 只保留一份模型。
+- App Store 沙箱主 App 与 Developer ID Direct 主 App 都携带该 Team ID App Group；Direct 最终重签使用最小发布 entitlement。Widget、屏保与 `codebase.bin` 均不继承模型组权限。
 - MLX 依赖加入两个 app target（`project.yml` 的 Starcat 与 StarcatDirect `dependencies:`），**不进 Widget target**（`APPLICATION_EXTENSION_API_ONLY`）。
 
 ---

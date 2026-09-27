@@ -7,9 +7,9 @@
 //  关键约束：
 //  - 模型是「机器级资源」，不进 per-user 数据库：数据库按 users/<userId>/ 隔离，
 //    而模型应该跨账号共享。安装状态单一真源 = 每个模型目录里的 manifest.json。
-//  - 路径统一走 `FileManager.applicationSupportDirectory + AppConstants.bundleIdentifier`，
-//    与 `CacheDirectoryLocator.applicationSupportRoot()` 同一惯例，禁止硬编码
-//    `~/Library/...`（沙盒 / Direct 双渠道会落到不同容器）。
+//  - 当前路径统一落在 Local AI App Group。App Store / Direct 只共享模型资源，
+//    用户数据库、偏好和缓存仍按渠道隔离。
+//  - 旧路径仍可解析，但只供一次性迁移读取，禁止新下载继续写入旧目录。
 //  - 目录名 = `<entry.id>@<revision>`：revision 进目录名让版本可追溯；同时保证
 //    Qwen3 reranker 的目录名包含 "rerank"，满足 `RerankerModelFactory` 的
 //    verified-naming 要求。
@@ -50,6 +50,8 @@ enum LocalAIModelStorage {
     /// 单测注入的 models 根目录。仅 `TestEnvironment.isRunning` 时生效，
     /// 避免测试把文件写进测试宿主真实的 Application Support。
     nonisolated(unsafe) static var testRootOverride: URL?
+    /// 单测注入的旧版 models 根目录。与共享根目录分开，才能覆盖迁移 / 冲突场景。
+    nonisolated(unsafe) static var testLegacyRootOverride: URL?
 
     enum StorageError: LocalizedError, Equatable {
         case applicationSupportUnavailable
@@ -68,10 +70,31 @@ enum LocalAIModelStorage {
 
     // MARK: - 路径解析
 
-    /// `Application Support/<bundleId>/models/`。
+    /// App Group 内的版本化共享模型目录。
+    ///
+    /// `v1` 是磁盘协议版本，不是 App 版本。未来若目录语义变化，应新增版本迁移，
+    /// 不能原地改变已安装用户的共享目录解释方式。
     static func modelsRootURL(fileManager: FileManager = .default) throws -> URL {
         if TestEnvironment.isRunning, let testRootOverride {
             return testRootOverride
+        }
+        guard let container = fileManager.containerURL(
+            forSecurityApplicationGroupIdentifier: AppConstants.localAIAppGroupIdentifier
+        ) else {
+            throw StorageError.applicationSupportUnavailable
+        }
+        return container
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+            .appendingPathComponent("Starcat", isDirectory: true)
+            .appendingPathComponent("LocalAI", isDirectory: true)
+            .appendingPathComponent("v1", isDirectory: true)
+            .appendingPathComponent("models", isDirectory: true)
+    }
+
+    /// 当前渠道升级前使用的私有模型目录。沙盒版与 Direct 版会解析到各自旧位置。
+    static func legacyModelsRootURL(fileManager: FileManager = .default) throws -> URL {
+        if TestEnvironment.isRunning, let testLegacyRootOverride {
+            return testLegacyRootOverride
         }
         guard let appSupport = fileManager.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
@@ -83,11 +106,24 @@ enum LocalAIModelStorage {
             .appendingPathComponent("models", isDirectory: true)
     }
 
+    /// 锁文件与模型目录分离，删除全部模型时不会删掉正在协调其它进程的 inode。
+    static func locksRootURL(fileManager: FileManager = .default) throws -> URL {
+        try modelsRootURL(fileManager: fileManager)
+            .deletingLastPathComponent()
+            .appendingPathComponent("locks", isDirectory: true)
+    }
+
     /// 某个 catalog 类型在 models 下的子目录（embedding / reranker / llm）。
     static func typeDirectory(
         for type: LocalAIModelType, fileManager: FileManager = .default
     ) throws -> URL {
-        try modelsRootURL(fileManager: fileManager)
+        typeDirectory(
+            for: type,
+            modelsRoot: try modelsRootURL(fileManager: fileManager))
+    }
+
+    static func typeDirectory(for type: LocalAIModelType, modelsRoot: URL) -> URL {
+        modelsRoot
             .appendingPathComponent(type.storagePathComponent, isDirectory: true)
     }
 
@@ -95,7 +131,16 @@ enum LocalAIModelStorage {
     static func modelDirectory(
         entry: LocalAIModelCatalogEntry, revision: String, fileManager: FileManager = .default
     ) throws -> URL {
-        try typeDirectory(for: entry.type, fileManager: fileManager)
+        modelDirectory(
+            entry: entry,
+            revision: revision,
+            modelsRoot: try modelsRootURL(fileManager: fileManager))
+    }
+
+    static func modelDirectory(
+        entry: LocalAIModelCatalogEntry, revision: String, modelsRoot: URL
+    ) -> URL {
+        typeDirectory(for: entry.type, modelsRoot: modelsRoot)
             .appendingPathComponent("\(entry.id)@\(revision)", isDirectory: true)
     }
 
@@ -146,9 +191,17 @@ enum LocalAIModelStorage {
     ///
     /// 无 manifest 的目录视为未完成下载，静默跳过（由 `cleanIncompleteDownloads` 物理清理）。
     static func listInstalled(fileManager: FileManager = .default) throws -> [LocalAIInstalledModel] {
+        try listInstalled(
+            at: modelsRootURL(fileManager: fileManager),
+            fileManager: fileManager)
+    }
+
+    static func listInstalled(
+        at modelsRoot: URL, fileManager: FileManager = .default
+    ) throws -> [LocalAIInstalledModel] {
         var result: [LocalAIInstalledModel] = []
         for type in LocalAIModelType.allCases {
-            let typeDir = try typeDirectory(for: type, fileManager: fileManager)
+            let typeDir = typeDirectory(for: type, modelsRoot: modelsRoot)
             let children = (try? fileManager.contentsOfDirectory(
                 at: typeDir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
             for child in children.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
@@ -162,6 +215,58 @@ enum LocalAIModelStorage {
             }
         }
         return result
+    }
+
+    /// 返回根目录下全部模型目录，包括没有 manifest 的未完成目录。
+    static func modelDirectories(
+        at modelsRoot: URL, fileManager: FileManager = .default
+    ) -> [URL] {
+        LocalAIModelType.allCases.flatMap { type in
+            let typeRoot = typeDirectory(for: type, modelsRoot: modelsRoot)
+            return ((try? fileManager.contentsOfDirectory(
+                at: typeRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles])) ?? []).filter { child in
+                    (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                }
+        }
+    }
+
+    /// 校验 manifest 声明的文件、大小与 SHA256。迁移删除旧副本前必须通过此检查。
+    static func isInstallationValid(
+        manifest: LocalAIInstalledModel,
+        directory: URL,
+        verifyHashes: Bool,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        guard !manifest.files.isEmpty else { return false }
+        for file in manifest.files {
+            let url = directory.appendingPathComponent(file.name, isDirectory: false)
+            guard fileManager.fileExists(atPath: url.path),
+                let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+                let number = attributes[.size] as? NSNumber,
+                number.int64Value == file.sizeBytes
+            else { return false }
+            if verifyHashes {
+                guard let digest = try? sha256(ofFileAt: url),
+                    digest.caseInsensitiveCompare(file.sha256) == .orderedSame
+                else { return false }
+            }
+        }
+        return true
+    }
+
+    /// 判断两个清单是否描述同一份不可变模型内容；安装时间和下载源不影响等价性。
+    static func hasSameContent(
+        _ lhs: LocalAIInstalledModel,
+        _ rhs: LocalAIInstalledModel
+    ) -> Bool {
+        lhs.id == rhs.id
+            && lhs.type == rhs.type
+            && lhs.revision == rhs.revision
+            && lhs.files.sorted(by: { $0.name < $1.name }) == rhs.files.sorted(by: { $0.name < $1.name })
+            && lhs.embeddingDimension == rhs.embeddingDimension
+            && lhs.totalBytes == rhs.totalBytes
     }
 
     /// 删除整个模型目录。

@@ -132,6 +132,11 @@ struct AppStoreToDirectImportTests {
             try Data("token".utf8).write(
                 to: layout.storeStarcatAppSupport.appendingPathComponent("credentials.json")
             )
+            let legacyModel = layout.storeStarcatAppSupport
+                .appendingPathComponent("models/llm/example@r1", isDirectory: true)
+            try fileManager.createDirectory(at: legacyModel, withIntermediateDirectories: true)
+            try Data("large-model-placeholder".utf8).write(
+                to: legacyModel.appendingPathComponent("model.safetensors"))
 
             let zipDirectory = layout.storeProductSupport.appendingPathComponent("archives/github.com/octo", isDirectory: true)
             try fileManager.createDirectory(at: zipDirectory, withIntermediateDirectories: true)
@@ -165,11 +170,13 @@ struct AppStoreToDirectImportTests {
 
             #expect(fileManager.fileExists(atPath: layout.directStarcatAppSupport.appendingPathComponent("users/42/starcat.sqlite").path))
             #expect(fileManager.fileExists(atPath: layout.directStarcatAppSupport.appendingPathComponent("credentials.json").path))
+            #expect(fileManager.fileExists(atPath: layout.directStarcatAppSupport.appendingPathComponent("models").path) == false)
             #expect(fileManager.fileExists(atPath: layout.directProductSupport.appendingPathComponent("archives/github.com/octo/repo.zip").path))
             #expect(fileManager.fileExists(atPath: layout.directProductSupport.appendingPathComponent("archives/github.com/octo/repo.zip.tmp").path) == false)
             #expect(fileManager.fileExists(atPath: layout.directKingfisherCache.appendingPathComponent("owner.png").path))
             #expect(fileManager.fileExists(atPath: layout.directWidgetGroup.appendingPathComponent("widget-snapshot-v1.json").path))
             #expect(fileManager.fileExists(atPath: layout.storeStarcatAppSupport.appendingPathComponent("users/42/starcat.sqlite").path))
+            #expect(fileManager.fileExists(atPath: legacyModel.path))
             #expect(defaults.string(forKey: "settings.appearanceMode") == "dark")
             #expect(defaults.object(forKey: AppSettings.Keys.isProUser) == nil)
         }

@@ -17,6 +17,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/debug-build-environment.sh"
 DERIVED_DATA="$PROJECT_ROOT/build/DerivedData-Sandbox"
 APP_PATH="$DERIVED_DATA/Build/Products/Debug/Starcat.app"
+WIDGET_PATH="$APP_PATH/Contents/PlugIns/StarcatWidgets.appex"
+LOCAL_AI_APP_GROUP="8WCUMGCWMB.com.starcat.app.localai"
 
 # 正式 Apple Developer Team ID。后续如果换账号，可用环境变量覆盖：
 #   STARCAT_DEVELOPMENT_TEAM=XXXXXXXXXX ./scripts/run-debug-appstore.sh
@@ -74,6 +76,15 @@ if ! grep -q "com.apple.security.app-sandbox" <<<"$ENTITLEMENTS"; then
 fi
 if ! grep -q "com.apple.security.files.user-selected.read-write" <<<"$ENTITLEMENTS"; then
   echo "ERROR: user-selected read/write entitlement 缺失，拒绝启动。"
+  exit 1
+fi
+if ! grep -Fq "$LOCAL_AI_APP_GROUP" <<<"$ENTITLEMENTS"; then
+  echo "ERROR: 本地 AI 共享 App Group 缺失，拒绝启动。"
+  exit 1
+fi
+WIDGET_ENTITLEMENTS="$(codesign -d --entitlements :- "$WIDGET_PATH" 2>/dev/null || true)"
+if grep -Fq "$LOCAL_AI_APP_GROUP" <<<"$WIDGET_ENTITLEMENTS"; then
+  echo "ERROR: Widget 不应获得本地 AI 共享 App Group。"
   exit 1
 fi
 

@@ -134,7 +134,7 @@ struct LocalAIModelsSection: View {
                 settings.localAIDownloadSource = $0
                 // 断点续传文件按源隔离 + 切源即清：HF 的 part 前缀拼上魔塔的后续数据
                 // 会产出损坏权重（禁止静默混流，dong4j 2026-09-12）。
-                LocalAIModelStorage.cleanPartialFiles()
+                manager.cleanPartialDownloadsForSourceChange()
             })
     }
 
@@ -393,6 +393,11 @@ struct LocalAIModelsSection: View {
                 .frame(width: Self.statusAreaWidth - 4)
                 .help(Text("settings.localai.model.status.loading"))
 
+        case .deleting:
+            ProgressView()
+                .controlSize(.small)
+                .help(Text("settings.localai.model.action.delete"))
+
         case .failed:
             Button {
                 manager.install(entry: entry)
@@ -418,6 +423,9 @@ struct LocalAIModelsSection: View {
             .buttonStyle(.plain)
             .focusEffectDisabled()
             .help("settings.localai.model.action.retryLoad")
+
+        case .deleteFailed:
+            deleteButton(entry)
 
         case .installed:
             HStack(spacing: 6) {
@@ -445,6 +453,12 @@ struct LocalAIModelsSection: View {
             Text(message)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(2)
+        case .deleteFailed(let message):
+            Text(message)
+                .font(.caption2)
+                .foregroundStyle(.red)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(2)
         default:

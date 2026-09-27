@@ -7,7 +7,8 @@
 //  关键约束：
 //  - 拷贝来源只认 `com.starcat.app.store`，忽略 `.store.debug` 和任何 Direct 容器；
 //  - Debug Direct 可以弹窗，方便本机验证；生产用户仍走正式 Direct；
-//  - 只拷不共用：两边目录仍然独立，App Store 原数据不删；
+//  - 用户数据只拷不共用：两边目录仍然独立，App Store 原数据不删；本地 AI 模型
+//    不走本导入链，由共享模型协调器迁入 App Group，避免复制数 GB 权重；
 //  - 必须用户确认；选「不拷贝」后不再追问；
 //  - Apple 订阅 / StoreKit 镜像不迁，避免 Direct 出现假 Pro。
 //

@@ -68,7 +68,13 @@ struct AppStoreToDirectImportCopyService {
         try fileManager.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: stagingRoot) }
 
-        try stageExistingDirectory(layout.storeStarcatAppSupport, as: "app-support", under: stagingRoot)
+        // 旧模型由 LocalAISharedModelCoordinator 校验后迁入 App Group。首次数据导入
+        // 不能再把数 GB 模型复制进 Direct 私有目录，否则会制造第三份副本。
+        try stageExistingDirectory(
+            layout.storeStarcatAppSupport,
+            as: "app-support",
+            under: stagingRoot,
+            excludedTopLevelNames: ["models"])
         try stageExistingDirectory(layout.storeProductSupport, as: "product-support", under: stagingRoot)
         try stageExistingDirectory(layout.storeKingfisherCache, as: "kingfisher", under: stagingRoot)
         // Direct 没有 `group.com.starcat.app.store.widgets` entitlement。
@@ -125,12 +131,16 @@ struct AppStoreToDirectImportCopyService {
         _ source: URL,
         as name: String,
         under stagingRoot: URL,
-        isOptional: Bool = false
+        isOptional: Bool = false,
+        excludedTopLevelNames: Set<String> = []
     ) throws {
         guard fileManager.fileExists(atPath: source.path) else { return }
         do {
             let destination = stagingRoot.appendingPathComponent(name, isDirectory: true)
-            try copyTreeSkippingTemporaryFiles(from: source, to: destination)
+            try copyTreeSkippingTemporaryFiles(
+                from: source,
+                to: destination,
+                excludedNames: excludedTopLevelNames)
         } catch {
             if isOptional {
                 AppLog.general.warning(
@@ -167,7 +177,11 @@ struct AppStoreToDirectImportCopyService {
         }
     }
 
-    private func copyTreeSkippingTemporaryFiles(from source: URL, to destination: URL) throws {
+    private func copyTreeSkippingTemporaryFiles(
+        from source: URL,
+        to destination: URL,
+        excludedNames: Set<String> = []
+    ) throws {
         try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
         let items = try fileManager.contentsOfDirectory(
             at: source,
@@ -175,11 +189,13 @@ struct AppStoreToDirectImportCopyService {
             options: []
         )
         for item in items {
+            if excludedNames.contains(item.lastPathComponent) { continue }
             if Self.shouldSkipCopying(item) { continue }
             let childDestination = destination.appendingPathComponent(item.lastPathComponent)
             var isDirectory: ObjCBool = false
             guard fileManager.fileExists(atPath: item.path, isDirectory: &isDirectory) else { continue }
             if isDirectory.boolValue {
+                // 排除项只作用于本次 source 根层；子目录里同名的普通业务目录照常复制。
                 try copyTreeSkippingTemporaryFiles(from: item, to: childDestination)
             } else {
                 try fileManager.copyItem(at: item, to: childDestination)

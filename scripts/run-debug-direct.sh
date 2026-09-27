@@ -21,6 +21,8 @@ DERIVED_DATA="$PROJECT_ROOT/build/DerivedData-NoSandbox"
 APP_PATH="$DERIVED_DATA/Build/Products/Debug/Starcat.app"
 APP_EXECUTABLE="$APP_PATH/Contents/MacOS/Starcat"
 WIDGET_EXTENSION_PATH="$APP_PATH/Contents/PlugIns/StarcatDirectWidgets.appex"
+DIRECT_DEBUG_ENTITLEMENTS="$PROJECT_ROOT/Starcat/StarcatDirect.entitlements"
+LOCAL_AI_APP_GROUP="8WCUMGCWMB.com.starcat.app.localai"
 DIRECT_DEBUG_BUNDLE_ID="com.starcat.app.direct.debug"
 DIRECT_RELEASE_BUNDLE_ID="com.starcat.app.direct"
 DIRECT_DEBUG_WIDGET_BUNDLE_ID="com.starcat.app.direct.debug.widgets"
@@ -167,6 +169,10 @@ if grep -q "com.apple.security.app-sandbox" <<<"$ENTITLEMENTS"; then
   echo "ERROR: 检测到沙箱 entitlement，非沙箱脚本拒绝启动。"
   exit 1
 fi
+if ! grep -Fq "$LOCAL_AI_APP_GROUP" <<<"$ENTITLEMENTS"; then
+  echo "ERROR: Direct 构建产物缺少本地 AI 共享 App Group，拒绝启动。"
+  exit 1
+fi
 ACTUAL_BUNDLE_ID=$(/usr/libexec/PlistBuddy \
   -c "Print :CFBundleIdentifier" \
   "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)
@@ -232,10 +238,22 @@ for COMPONENT_PATH in "${SPARKLE_NESTED_CODE[@]}"; do
   fi
 done
 codesign --force --sign "$DEBUG_SIGN_IDENTITY" --timestamp=none "$SPARKLE_FRAMEWORK_PATH" >/dev/null
-codesign --force --sign "$DEBUG_SIGN_IDENTITY" --timestamp=none "$APP_PATH" >/dev/null
+codesign --force --sign "$DEBUG_SIGN_IDENTITY" --timestamp=none \
+  --entitlements "$DIRECT_DEBUG_ENTITLEMENTS" "$APP_PATH" >/dev/null
 
 if ! codesign --verify --deep --strict "$APP_PATH"; then
   echo "ERROR: Direct App 或内嵌 Widget Extension 签名校验失败，拒绝启动。"
+  exit 1
+fi
+
+FINAL_ENTITLEMENTS="$(codesign -d --entitlements :- "$APP_PATH" 2>/dev/null || true)"
+if ! grep -Fq "$LOCAL_AI_APP_GROUP" <<<"$FINAL_ENTITLEMENTS"; then
+  echo "ERROR: Direct 重签后丢失本地 AI 共享 App Group，拒绝启动。"
+  exit 1
+fi
+WIDGET_ENTITLEMENTS="$(codesign -d --entitlements :- "$WIDGET_EXTENSION_PATH" 2>/dev/null || true)"
+if grep -Fq "$LOCAL_AI_APP_GROUP" <<<"$WIDGET_ENTITLEMENTS"; then
+  echo "ERROR: Direct Widget 不应获得本地 AI 共享 App Group。"
   exit 1
 fi
 

@@ -37,6 +37,9 @@ actor LocalMLXRuntime {
     private var embedderDirectoryID: String?
     private var rerankerContainer: RerankerContainer?
     private var rerankerDirectoryID: String?
+    /// 每个驻留容器对应的跨进程共享读锁。必须晚于容器引用释放，避免另一个渠道
+    /// 在 MLX 仍 mmap 权重时删除模型目录。
+    private var modelAccessLeases: [LocalAIModelType: LocalAIModelAccessLease] = [:]
     private let gate = LocalAIOperationGate()
     private var residents: [LocalAIModelType: LocalAIResidentModel] = [:]
     private var generations: [LocalAIModelType: Int] = [:]
@@ -176,6 +179,8 @@ actor LocalMLXRuntime {
         if case .failure(let error) = result, residents[type]?.phase == .loading {
             residents[type]?.phase = .failed
             residents[type]?.error = error.localizedDescription
+            // 工厂加载失败时没有可用容器，不能把读锁一直留到闲置回收。
+            modelAccessLeases.removeValue(forKey: type)?.release()
             LocalAILog.record("model.load.failed", "Model loading ended without a usable container.",
                               level: error is CancellationError ? .info : .error,
                               fields: LocalAILogEvent.errorFields(error))
@@ -226,7 +231,7 @@ actor LocalMLXRuntime {
         return result
     }
 
-    private func beginLoading(_ type: LocalAIModelType, directory: URL) throws -> Int {
+    private func beginLoading(_ type: LocalAIModelType, directory: URL) async throws -> Int {
         clearContainer(type)
         Memory.clearCache()
         residents[type] = .init(directory: directory, phase: .loading)
@@ -246,6 +251,10 @@ actor LocalMLXRuntime {
                 Memory.clearCache()
             }
         }
+        // 目录检查与实际权重读取必须处于同一个租约内；只在工厂 load 之前检查存在
+        // 仍有 TOCTOU 窗口，另一渠道可能紧接着删除。
+        modelAccessLeases[type] = try await LocalAISharedModelCoordinator.shared
+            .acquireModelRead(at: directory)
         return Memory.activeMemory
     }
 
@@ -268,7 +277,7 @@ actor LocalMLXRuntime {
             LocalAILog.record("model.reused", "Reusing resident generation model.")
             return container
         }
-        let before = try beginLoading(.llm, directory: directory)
+        let before = try await beginLoading(.llm, directory: directory)
         try ensureRuntimeAvailable()
         let container = try await LLMModelFactory.shared.loadContainer(
             from: directory,
@@ -285,7 +294,7 @@ actor LocalMLXRuntime {
             LocalAILog.record("model.reused", "Reusing resident embedding model.")
             return container
         }
-        let before = try beginLoading(.embedding, directory: directory)
+        let before = try await beginLoading(.embedding, directory: directory)
         try ensureRuntimeAvailable()
         let container = try await EmbedderModelFactory.shared.loadContainer(
             from: directory,
@@ -302,7 +311,7 @@ actor LocalMLXRuntime {
             LocalAILog.record("model.reused", "Reusing resident reranker model.")
             return container
         }
-        let before = try beginLoading(.reranker, directory: directory)
+        let before = try await beginLoading(.reranker, directory: directory)
         try ensureRuntimeAvailable()
         let container = try await RerankerModelFactory.shared.loadContainer(
             from: directory,
@@ -361,6 +370,9 @@ actor LocalMLXRuntime {
             rerankerContainer = nil
             rerankerDirectoryID = nil
         }
+        // 先清空容器，再放行文件删除；顺序反过来会让另一进程看见“可删”但本进程
+        // 仍持有 mmap / tokenizer 文件引用。
+        modelAccessLeases.removeValue(forKey: type)?.release()
         residents[type]?.phase = .unloaded
         residents[type]?.loadedBytes = 0
         loadStartedAt.removeValue(forKey: type)

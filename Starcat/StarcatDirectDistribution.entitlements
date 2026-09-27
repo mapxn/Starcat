@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Direct 最终 Developer ID 重签只保留主 App 必需的共享模型容器。
+      不复用开发期 entitlement，避免把 get-task-allow 或 App Sandbox 带进公证包。
+    -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>8WCUMGCWMB.com.starcat.app.localai</string>
+    </array>
+</dict>
+</plist>

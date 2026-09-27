@@ -90,7 +90,13 @@ struct LocalMLXClient: AIClientProtocol {
     private func runChat(
         request: AIChatRequest, continuation: AsyncThrowingStream<AIChatStreamEvent, Error>.Continuation
     ) async {
-        let directory = Result { try directoryForModelName(request.model) }
+        let directory: Result<URL, Error>
+        do {
+            try await prepareSharedStorageForAccess()
+            directory = Result { try directoryForModelName(request.model) }
+        } catch {
+            directory = .failure(error)
+        }
         let context = LocalAILogContext(
             modelName: request.model,
             feature: (request.usageContext ?? configuration?.usageContext)?.feature.rawValue ?? "chat",
@@ -147,6 +153,7 @@ struct LocalMLXClient: AIClientProtocol {
 
     func embeddings(inputs: [String], model: String?) async throws -> [[Float]] {
         let modelName = model ?? configuration?.embeddingModel ?? ""
+        try await prepareSharedStorageForAccess()
         let resolved = Result { try directoryForModelName(modelName) }
         let context = LocalAILogContext(modelName: modelName, feature: "embedding", directory: try? resolved.get())
         return try await LocalAILogContext.$current.withValue(context) {
@@ -200,6 +207,7 @@ struct LocalMLXClient: AIClientProtocol {
     }
 
     func listModels() async throws -> [AIModelDescriptor] {
+        try await prepareSharedStorageForAccess()
         let installedIDs = Set(
             ((try? LocalAIModelStorage.listInstalled()) ?? []).map(\.id))
         return LocalAIModelCatalog.entries.compactMap { entry in
@@ -214,6 +222,7 @@ struct LocalMLXClient: AIClientProtocol {
     }
 
     func testConnection() async throws {
+        try await prepareSharedStorageForAccess()
         // 本地「连接测试」= 完整性检查：manifest 声明的文件都真实存在。
         let installed = (try? LocalAIModelStorage.listInstalled()) ?? []
         for manifest in installed {
@@ -226,6 +235,13 @@ struct LocalMLXClient: AIClientProtocol {
                 throw LocalAIError.modelNotInstalled(entry.displayName)
             }
         }
+    }
+
+    /// 推理解析目录前等待一次性迁移完成，避免升级后的首个请求在旧目录尚未搬完时
+    /// 短暂误报“模型未安装”。测试保留原有注入路径，不触碰真实 App Group。
+    private func prepareSharedStorageForAccess() async throws {
+        guard !TestEnvironment.isRunning else { return }
+        try await LocalAISharedModelCoordinator.shared.prepareSharedStorageIfNeeded()
     }
 
     /// 只记录统计元数据；没有 usage 时保持 nil，不把字符数伪装成 token。
