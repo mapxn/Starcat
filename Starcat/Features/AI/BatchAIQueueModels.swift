@@ -296,10 +296,11 @@ struct BatchAIQueueOptions: Codable, Equatable, Sendable {
     /// 用户首次大批量整理时主动开启，平时小批量保持手动确认更安全。
     var autoApplyTags: Bool = false
 
-    /// 自动应用时，是否同时创建标签库中尚不存在的标签。
+    /// 是否允许人工批次扩充标签库中尚不存在的全局标签。
     ///
-    /// 默认关闭。它同时控制“Jev 现有标签不足时是否允许 LLM 补新标签”；自动应用关闭时，
-    /// 新标签只进入当前窗口等待人工确认，不会因为允许生成就直接写库。
+    /// 默认关闭。开启后首轮仍只让 Jev / Provider 复用现有词表；全部仓库结束后，把未覆盖
+    /// 仓库汇总成一次 LLM 概念发现，最多给出 5 个候选。用户确认扩词并重新分类后，
+    /// repo_tags 仍在当前窗口逐仓确认。自动后台整理永不自行扩充词表。
     var autoCreateMissingTags: Bool = false
 
     /// 本次摘要生成是否启用代码上下文。
@@ -351,7 +352,8 @@ struct BatchAIQueueOptions: Codable, Equatable, Sendable {
         return standardActionRepoIDs?.contains(repoID) ?? true
     }
 
-    /// 生成与落库共用同一个“允许新增”意图；阈值只在自动应用时参与 Jev 结果是否足够的判断。
+    /// “允许新增”意图由队列在第二阶段统一消费；首轮 Worker 会复制该策略并强制关闭新增。
+    /// 阈值仍只在自动应用现有标签时参与 Jev 结果是否足够的判断。
     var tagGenerationPolicy: AITagGenerationPolicy {
         AITagGenerationPolicy(
             allowNewTags: autoCreateMissingTags,

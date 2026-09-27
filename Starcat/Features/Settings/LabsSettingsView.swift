@@ -125,7 +125,7 @@ struct LabsSettingsTab: View {
                     .foregroundStyle(.secondary)
 
                 Toggle("settings.labs.typesafe.tags.unified", isOn: $settings.typesafeTagSuggestionsEnabled)
-                Text("settings.labs.typesafe.tags.unified.description")
+                Text("settings.labs.typesafe.tags.pooled.description")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

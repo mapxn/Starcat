@@ -18,21 +18,30 @@
 
 import Foundation
 
-enum TagTaxonomySignalKind: String, CaseIterable, Hashable, Sendable {
+enum TagTaxonomySessionKind: String, Codable, Equatable, Sendable {
+    /// 空标签库的纯本地首次建词表流程。
+    case bootstrap
+    /// 常规批次中，针对 Jev 未覆盖仓库生成的受控增量词表。
+    case expansion
+}
+
+enum TagTaxonomySignalKind: String, CaseIterable, Codable, Hashable, Sendable {
     case topic
     case language
     case description
     case readme
+    /// 只表示候选来自一次整批 LLM 概念发现，不代表已经通过用户确认或写入标签库。
+    case llm
 }
 
-struct TagTaxonomyRepositoryMatch: Equatable, Sendable {
+struct TagTaxonomyRepositoryMatch: Codable, Equatable, Sendable {
     let repoID: Int64
     let repositoryFullName: String
     let confidence: Double
     let signals: Set<TagTaxonomySignalKind>
 }
 
-struct TagTaxonomyCandidate: Identifiable, Equatable, Sendable {
+struct TagTaxonomyCandidate: Identifiable, Codable, Equatable, Sendable {
     /// ID 在用户改名后仍保持稳定，避免 SwiftUI List 因编辑文字而重建整行。
     let id: String
     var name: String
@@ -43,12 +52,34 @@ struct TagTaxonomyCandidate: Identifiable, Equatable, Sendable {
     let targetMatches: [TagTaxonomyRepositoryMatch]
 }
 
-struct TagTaxonomyBootstrapSession: Equatable, Sendable {
+struct TagTaxonomyBootstrapSession: Codable, Equatable, Sendable {
+    /// 同一套确认 UI 同时承载首次建词表与增量扩词；kind 决定文案和后续提交路径。
+    let kind: TagTaxonomySessionKind
+    /// 确认后投影到逐仓审核的建议来源，必须由本地调用边界盖章。
+    let suggestionEngine: AITagSuggestionEngine
     let targetRepositories: [Repo]
     let candidates: [TagTaxonomyCandidate]
     let defaultSelectedCandidateIDs: Set<String>
     let corpusRepositoryCount: Int
     let cachedReadmeCount: Int
+
+    init(
+        kind: TagTaxonomySessionKind = .bootstrap,
+        suggestionEngine: AITagSuggestionEngine = .local,
+        targetRepositories: [Repo],
+        candidates: [TagTaxonomyCandidate],
+        defaultSelectedCandidateIDs: Set<String>,
+        corpusRepositoryCount: Int,
+        cachedReadmeCount: Int
+    ) {
+        self.kind = kind
+        self.suggestionEngine = suggestionEngine
+        self.targetRepositories = targetRepositories
+        self.candidates = candidates
+        self.defaultSelectedCandidateIDs = defaultSelectedCandidateIDs
+        self.corpusRepositoryCount = corpusRepositoryCount
+        self.cachedReadmeCount = cachedReadmeCount
+    }
 
     func targetCoverage(selectedCandidateIDs: Set<String>) -> Int {
         Set(
@@ -100,7 +131,7 @@ struct TagTaxonomyBootstrapSession: Equatable, Sendable {
                         name: item.candidate.name,
                         confidence: item.match.confidence,
                         reason: reason,
-                        engine: .local
+                        engine: suggestionEngine
                     )
                 }
                 .prefix(limit)

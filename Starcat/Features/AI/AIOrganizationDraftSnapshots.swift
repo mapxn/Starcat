@@ -15,6 +15,25 @@ import Foundation
 struct BatchAIOrganizationDraftHeader: Codable, Sendable {
     let options: BatchAIQueueOptions
     let startedAt: Date
+    /// 增量扩词是用户尚未确认的生成结果，必须随现有批量草稿恢复，不能因退出 App 丢失。
+    let pendingTagExpansionSession: TagTaxonomyBootstrapSession?
+    /// 生成增量候选失败时保留待发现仓库，用户修复 Provider 后可只重试整批发现。
+    let uncoveredTagRepositoryIDs: Set<Int64>?
+    let tagExpansionError: String?
+
+    init(
+        options: BatchAIQueueOptions,
+        startedAt: Date,
+        pendingTagExpansionSession: TagTaxonomyBootstrapSession? = nil,
+        uncoveredTagRepositoryIDs: Set<Int64>? = nil,
+        tagExpansionError: String? = nil
+    ) {
+        self.options = options
+        self.startedAt = startedAt
+        self.pendingTagExpansionSession = pendingTagExpansionSession
+        self.uncoveredTagRepositoryIDs = uncoveredTagRepositoryIDs
+        self.tagExpansionError = tagExpansionError
+    }
 }
 
 private enum PersistedBatchTagReviewKind: String, Codable, Sendable {

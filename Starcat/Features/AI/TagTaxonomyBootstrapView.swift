@@ -2,7 +2,7 @@
 //  TagTaxonomyBootstrapView.swift
 //  Starcat
 //
-//  首次标签体系的确认工作台。
+//  首次标签体系与增量扩词共用的确认工作台。
 //
 //  该视图嵌入 BatchAIWorkspaceView 的固定尺寸窗口：左侧选择/改名候选标签，右侧展示
 //  来源与样例仓库。确认前只改内存状态；持久化与进入逐仓审核由 HomeView 回调统一执行。
@@ -96,15 +96,15 @@ struct TagTaxonomyBootstrapView: View {
     private var summaryCards: some View {
         HStack(spacing: 10) {
             summaryCard(
-                title: String.l10n("batchAI.taxonomy.metric.corpus"),
+                title: String.l10n(primaryRepositoryMetricKey),
                 value: model.session.corpusRepositoryCount.formatted(.number.locale(locale)),
                 icon: "shippingbox",
                 tint: .purple
             )
             summaryCard(
-                title: String.l10n("batchAI.taxonomy.metric.readme"),
-                value: model.session.cachedReadmeCount.formatted(.number.locale(locale)),
-                icon: "doc.text",
+                title: String.l10n(secondaryMetricKey),
+                value: secondaryMetricValue.formatted(.number.locale(locale)),
+                icon: model.session.kind == .bootstrap ? "doc.text" : "sparkles",
                 tint: .orange
             )
             summaryCard(
@@ -158,9 +158,9 @@ struct TagTaxonomyBootstrapView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("batchAI.taxonomy.candidates.title")
+                    Text(candidateTitleKey)
                         .font(interfaceScale.font(.panelTitle))
-                    Text("batchAI.taxonomy.candidates.subtitle")
+                    Text(candidateSubtitleKey)
                         .font(interfaceScale.font(.caption))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -339,6 +339,36 @@ struct TagTaxonomyBootstrapView: View {
         "\(model.targetCoverageCount)/\(model.session.targetRepositories.count)"
     }
 
+    private var primaryRepositoryMetricKey: String {
+        model.session.kind == .bootstrap
+            ? "batchAI.taxonomy.metric.corpus"
+            : "batchAI.expansion.metric.uncovered"
+    }
+
+    private var secondaryMetricKey: String {
+        model.session.kind == .bootstrap
+            ? "batchAI.taxonomy.metric.readme"
+            : "batchAI.expansion.metric.candidates"
+    }
+
+    private var secondaryMetricValue: Int {
+        model.session.kind == .bootstrap
+            ? model.session.cachedReadmeCount
+            : model.session.candidates.count
+    }
+
+    private var candidateTitleKey: LocalizedStringKey {
+        model.session.kind == .bootstrap
+            ? "batchAI.taxonomy.candidates.title"
+            : "batchAI.expansion.candidates.title"
+    }
+
+    private var candidateSubtitleKey: LocalizedStringKey {
+        model.session.kind == .bootstrap
+            ? "batchAI.taxonomy.candidates.subtitle"
+            : "batchAI.expansion.candidates.subtitle"
+    }
+
     private var panelBackground: some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
             .fill(
@@ -363,6 +393,7 @@ struct TagTaxonomyBootstrapView: View {
         case .language: "batchAI.taxonomy.signal.language"
         case .description: "batchAI.taxonomy.signal.description"
         case .readme: "batchAI.taxonomy.signal.readme"
+        case .llm: "batchAI.expansion.signal.llm"
         }
     }
 }

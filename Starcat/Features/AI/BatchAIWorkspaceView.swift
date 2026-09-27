@@ -23,6 +23,7 @@ struct BatchAIWorkspacePreflightContext {
 enum BatchAIWorkspaceInitialMode {
     case preflight(BatchAIWorkspacePreflightContext)
     case taxonomy(TagTaxonomyBootstrapReviewModel)
+    case expansion(TagTaxonomyBootstrapReviewModel)
     case review
 }
 
@@ -102,6 +103,10 @@ struct BatchAIWorkspaceView: View {
         } message: {
             Text("batchAI.panel.discard.message")
         }
+        .onAppear(perform: presentPendingExpansionIfNeeded)
+        .onChange(of: service.pendingTagExpansionSession) { _, _ in
+            presentPendingExpansionIfNeeded()
+        }
     }
 
     private var header: some View {
@@ -159,8 +164,32 @@ struct BatchAIWorkspaceView: View {
             )
         case .taxonomy(let model):
             TagTaxonomyBootstrapView(model: model)
+        case .expansion(let model):
+            TagTaxonomyBootstrapView(model: model)
         case .review:
-            BatchAIQueuePanel(service: service) { reviewFilter = $0 }
+            VStack(spacing: 0) {
+                if let error = service.tagExpansionError {
+                    HStack(spacing: 10) {
+                        Label {
+                            Text(verbatim: error)
+                                .lineLimit(2)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                        }
+                        .font(interfaceScale.font(.caption))
+                        .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Button("batchAI.expansion.retry") {
+                            Task { await service.retryTagExpansionDiscovery() }
+                        }
+                        .disabled(service.isRunning)
+                    }
+                    .padding(.horizontal, 20)
+                    .frame(minHeight: 42)
+                    Divider()
+                }
+                BatchAIQueuePanel(service: service) { reviewFilter = $0 }
+            }
         }
     }
 
@@ -248,6 +277,24 @@ struct BatchAIWorkspaceView: View {
                 }
                 .padding(.horizontal, 20)
                 .frame(height: 58)
+            case .expansion(let model):
+                HStack(spacing: 10) {
+                    expansionFooterMessage(model)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("batchAI.expansion.skip") {
+                        skipExpansion()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isStarting)
+                    Button("batchAI.expansion.confirm") {
+                        confirmExpansion(model)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(isStarting || !model.hasValidSelection)
+                }
+                .padding(.horizontal, 20)
+                .frame(height: 58)
             case .review:
                 AIOrganizationReviewFooter(
                     discardTitle: "batchAI.panel.discard.action",
@@ -319,6 +366,28 @@ struct BatchAIWorkspaceView: View {
         }
     }
 
+    @ViewBuilder
+    private func expansionFooterMessage(_ model: TagTaxonomyBootstrapReviewModel) -> some View {
+        if let error = model.operationError ?? operationError {
+            Label {
+                Text(verbatim: error)
+                    .lineLimit(2)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            .font(interfaceScale.font(.caption))
+            .foregroundStyle(.secondary)
+        } else if !model.hasValidSelection {
+            Label("batchAI.expansion.validation", systemImage: "exclamationmark.triangle.fill")
+                .font(interfaceScale.font(.caption))
+                .foregroundStyle(.secondary)
+        } else {
+            Label("batchAI.expansion.footer", systemImage: "lock.shield")
+                .font(interfaceScale.font(.caption))
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: - 审核底栏按 Tab 派生
 
     /// 支持批量动作勾选的 Tab；待确认/全部沿用批量应用勾选，待处理/已完成不参与批量选择。
@@ -380,6 +449,7 @@ struct BatchAIWorkspaceView: View {
 
     private var headerSubtitleKey: LocalizedStringKey {
         if case .taxonomy = mode { return "batchAI.taxonomy.subtitle" }
+        if case .expansion = mode { return "batchAI.expansion.subtitle" }
         return "batchAI.organizeTags.subtitle.compact"
     }
 
@@ -481,6 +551,43 @@ struct BatchAIWorkspaceView: View {
                 mode = .review
             }
         }
+    }
+
+    private func confirmExpansion(_ model: TagTaxonomyBootstrapReviewModel) {
+        guard !isStarting, model.hasValidSelection else { return }
+        isStarting = true
+        model.operationError = nil
+        Task {
+            let error = await service.confirmPendingTagExpansion(
+                selectedCandidates: model.selectedCandidates
+            )
+            isStarting = false
+            if let error {
+                model.operationError = error
+            } else {
+                mode = .review
+            }
+        }
+    }
+
+    private func skipExpansion() {
+        guard !isStarting else { return }
+        isStarting = true
+        Task {
+            await service.skipPendingTagExpansion()
+            isStarting = false
+            operationError = nil
+            mode = .review
+        }
+    }
+
+    private func presentPendingExpansionIfNeeded() {
+        guard let session = service.pendingTagExpansionSession else { return }
+        if case .expansion = mode { return }
+        // 预检与首次建词表属于尚未启动的新任务，不能被旧会话的恢复状态覆盖。
+        guard case .review = mode else { return }
+        operationError = nil
+        mode = .expansion(TagTaxonomyBootstrapReviewModel(session: session))
     }
 
     private func closeWorkspace() {

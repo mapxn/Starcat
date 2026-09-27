@@ -162,11 +162,17 @@ extension RepoAIInsightService: BatchAIInsightProviding {
         invocationMode: BatchAIInvocationMode,
         tagGenerationPolicy: AITagGenerationPolicy
     ) throws {
-        try ensureGenerationClientsReady(
-            includeSummary: includeSummary,
-            includeTags: includeTags,
-            tagGenerationPolicy: tagGenerationPolicy
-        )
+        if includeTags, tagGenerationPolicy.allowNewTags, invocationMode == .manual {
+            // 人工批次允许扩词时，LLM 会在 Jev 闭集首轮完成后承担一次整批概念发现。
+            // 启动前就校验配置，避免处理完数千仓库才发现无法进入第二阶段。
+            try ensureGenerationClientsReady(includeSummary: includeSummary, includeTags: true)
+        } else {
+            try ensureGenerationClientsReady(
+                includeSummary: includeSummary,
+                includeTags: includeTags,
+                tagGenerationPolicy: tagGenerationPolicy
+            )
+        }
     }
 
     func generateBatchTagSuggestions(

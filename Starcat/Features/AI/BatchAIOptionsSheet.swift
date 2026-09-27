@@ -203,12 +203,12 @@ struct BatchAIOptionsSheet: View {
                 isOn: $options.autoApplyTags
             )
             .disabled(requiresTaxonomyBootstrap)
-            // “允许新增”同时控制 Jev 不足时的 LLM 兜底，与是否自动落库正交：
-            // 自动应用关闭时，新标签仍只进入当前窗口等待人工确认。
-            CompactSettingsToggleRow(
-                title: "batchAI.options.autoCreateMissingTags",
-                isOn: $options.autoCreateMissingTags
-            )
+            // “允许新增”只打开整批概念发现：Jev 首轮未覆盖的仓库汇总后调用一次 LLM，
+            // 候选仍需确认并重新归类，与是否自动应用现有标签正交。
+                CompactSettingsToggleRow(
+                    title: "batchAI.options.allowVocabularyExpansion",
+                    isOn: $options.autoCreateMissingTags
+                )
             .disabled(requiresTaxonomyBootstrap)
 
             // 阈值始终可见，关闭自动应用时只禁用 Slider，避免开关导致卡片内容跳动。
@@ -225,6 +225,8 @@ struct BatchAIOptionsSheet: View {
 
                 if requiresTaxonomyBootstrap {
                     sessionNote(String.l10n("batchAI.taxonomy.summaryAfterSetup"))
+                } else if options.autoCreateMissingTags {
+                    sessionNote(String.l10n("batchAI.expansion.optionNote"))
                 }
 
                 if options.actions.contains(.summary) {

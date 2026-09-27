@@ -2272,7 +2272,7 @@ struct HomeView: View {
         session: TagTaxonomyBootstrapSession,
         selectedCandidates: [TagTaxonomyCandidate]
     ) async -> String? {
-        guard !selectedCandidates.isEmpty else {
+        guard session.kind == .bootstrap, !selectedCandidates.isEmpty else {
             return String.l10n("batchAI.taxonomy.validation")
         }
 

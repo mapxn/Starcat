@@ -712,9 +712,11 @@ final class RepoAIInsightService {
 
             # Jev New-Tag Fallback Override (STRICT)
             Jev has already evaluated the repository against every reusable tag supplied in this request.
-            For every repository, return exactly ONE genuinely new reusable tag name.
+            For every repository, return ZERO OR ONE genuinely new reusable tag name.
             The name MUST NOT equal or canonically duplicate any name in that repository's existing tags or in <shared_library_tags>.
             Do not return an existing vocabulary tag even when the base prompt says to prefer reuse.
+            Across the entire results array, use at most FIVE distinct new tag names. Reuse the same name for repositories that share a stable concept.
+            When more than one repository is provided, omit repository-specific or one-off concepts and prefer names supported by at least two repositories.
             This section overrides every conflicting reuse, minimum-count, and decision-order instruction above.
             """
         }
@@ -773,7 +775,9 @@ final class RepoAIInsightService {
             responseFormat: .jsonObject,
             usageContext: AIUsageContext(
                 feature: .repoTags,
-                phase: purpose == .newOnly ? "batch-new-tag-fallback" : "batch-recommendation"
+                phase: purpose == .newOnly && repos.count > 1
+                    ? "batch-vocabulary-discovery"
+                    : (purpose == .newOnly ? "batch-new-tag-fallback" : "batch-recommendation")
             )
         ))
         try Task.checkCancellation()

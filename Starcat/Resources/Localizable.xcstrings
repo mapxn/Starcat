@@ -460,6 +460,23 @@
         }
       }
     },
+    "settings.labs.typesafe.tags.pooled.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to single-repository suggestions, tag-only batches, mixed summary-and-tag tasks, and Auto Tidy. Jev first reuses matching existing tags. In manual batches that allow new tags, uncovered repositories are pooled into one AI request; confirm up to five shared tags before reclassification. Auto Tidy never expands the vocabulary."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于单仓标签建议、纯标签批量、摘要与标签混合任务以及自动整理。Jev 会优先复用匹配的现有标签；人工批量允许新增时，未覆盖仓库只汇总为一次 AI 请求，确认最多 5 个全局标签后再重新归类。自动整理不会扩充词表。"
+          }
+        }
+      }
+    },
     "settings.labs.typesafe.scope.unified.note" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -501513,6 +501530,227 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開放網路讀取"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.candidates.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One AI request grouped uncovered repositories into a small reusable vocabulary."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 通过一次整批请求，把未覆盖仓库收敛为少量可复用词表。"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.candidates.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shared tag candidates"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全局候选标签"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.confirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add tags and reclassify"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认扩词并重新归类"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.footer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only confirmed names enter your tag library; repository tags still wait for review."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有确认后的名称会进入标签库；仓库标签仍需在审核页确认。"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.metric.candidates" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Candidates"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "候选标签"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.metric.uncovered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uncovered"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未覆盖仓库"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.optionNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uncovered repositories are pooled into one AI request; confirm up to 5 shared tags before reclassification."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未覆盖仓库会汇总为一次 AI 请求；确认最多 5 个全局标签后再重新归类。"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.retry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry discovery"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重试概念发现"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.signal.llm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Batch AI"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整批 AI"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.skip" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skip expansion"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂不扩词"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirm a small vocabulary expansion before repositories are reclassified"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确认少量增量词表后，再重新归类未覆盖仓库"
+          }
+        }
+      }
+    },
+    "batchAI.expansion.validation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select 1–5 candidates with unique, non-empty names."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请选择 1–5 个名称非空且不重复的候选标签。"
+          }
+        }
+      }
+    },
+    "batchAI.options.allowVocabularyExpansion" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow vocabulary expansion"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许扩充标签库"
           }
         }
       }
