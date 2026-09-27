@@ -553,6 +553,7 @@ struct TypeSafeDecisionServiceTests {
         // 默认上限 3:ai(0.9)/cli(0.8)/swift(0.7) 入选;unrelated(0.3) 低于 0.5 下限被过滤。
         #expect(suggestions.map(\.name) == ["ai", "cli", "swift"])
         #expect(suggestions.map(\.confidence) == [0.9, 0.8, 0.7])
+        #expect(suggestions.allSatisfy { $0.engine == .jev })
 
         let body = try lastRequestBody()
         let state = try #require(body["state"] as? [String: Any])
@@ -1098,8 +1099,18 @@ struct TypeSafeSuggestionRoutersTests {
         settings.applyAITagSuggestionCounts(minimum: 2, maximum: 3)
         let fallback = RecordingTagFallback()
         fallback.tagSuggestions = [
-            AITagSuggestion(name: "Rust", confidence: 0.83, reason: "new systems language"),
-            AITagSuggestion(name: "swift", confidence: 0.99, reason: "must be rejected")
+            AITagSuggestion(
+                name: "Rust",
+                confidence: 0.83,
+                reason: "new systems language",
+                engine: .llm
+            ),
+            AITagSuggestion(
+                name: "swift",
+                confidence: 0.99,
+                reason: "must be rejected",
+                engine: .llm
+            )
         ]
         let router = TypeSafeTagSuggestionRouter(
             typesafeProvider: try makeJevStubService(
@@ -1122,6 +1133,8 @@ struct TypeSafeSuggestionRoutersTests {
 
         #expect(results[1]?.count == 3)
         #expect(results[1]?.contains(where: { $0.name == "Rust" }) == true)
+        #expect(results[1]?.first(where: { $0.name == "Rust" })?.engine == .llm)
+        #expect(results[1]?.filter { $0.name != "Rust" }.allSatisfy { $0.engine == .jev } == true)
         #expect(fallback.callCount == 1)
         #expect(fallback.tagPurposes == [.newOnly])
         #expect(URLProtocolStub.receivedRequests.count == 1)

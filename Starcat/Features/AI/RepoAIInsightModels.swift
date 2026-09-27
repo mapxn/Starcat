@@ -122,10 +122,22 @@ struct RepoAIInsightContextMeta: Codable, Equatable, Sendable {
     var commitShaShort: String { String(commitSha.prefix(7)) }
 }
 
+/// 标签建议实际由哪类引擎产生。
+///
+/// Jev 与 LLM 可能在同一次任务中各自产出一部分建议，因此来源必须随单条建议持久化，
+/// 不能只记录在任务级状态上。
+enum AITagSuggestionEngine: String, Codable, Equatable, Sendable {
+    case jev
+    case llm
+}
+
 struct AITagSuggestion: Codable, Identifiable, Equatable, Sendable {
     var name: String
     var confidence: Double
     var reason: String
+    /// 可选是为了兼容 1.9.0 之前已持久化、尚未确认的批量整理草稿。
+    /// 新生成结果必须在可信的 Jev / LLM 调用边界显式写入，不能采信模型自报来源。
+    var engine: AITagSuggestionEngine? = nil
 
     var id: String { name.localizedLowercase }
 }
@@ -258,7 +270,8 @@ enum AITagSuggestionPolicy {
                 normalizedSuggestion = AITagSuggestion(
                     name: existingName,
                     confidence: suggestion.confidence,
-                    reason: suggestion.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                    reason: suggestion.reason.trimmingCharacters(in: .whitespacesAndNewlines),
+                    engine: suggestion.engine
                 )
                 existingResults.append(normalizedSuggestion)
             } else {
@@ -266,7 +279,8 @@ enum AITagSuggestionPolicy {
                 normalizedSuggestion = AITagSuggestion(
                     name: proposedName,
                     confidence: suggestion.confidence,
-                    reason: suggestion.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                    reason: suggestion.reason.trimmingCharacters(in: .whitespacesAndNewlines),
+                    engine: suggestion.engine
                 )
                 newResults.append(normalizedSuggestion)
             }

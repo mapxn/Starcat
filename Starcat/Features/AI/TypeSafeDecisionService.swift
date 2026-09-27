@@ -380,7 +380,8 @@ final class TypeSafeDecisionService {
                 suggestions.append(AITagSuggestion(
                     name: name,
                     confidence: min(max(probability, 0), 1),
-                    reason: "Jev P=\(String(format: "%.2f", probability))"
+                    reason: "Jev P=\(String(format: "%.2f", probability))",
+                    engine: .jev
                 ))
             }
 

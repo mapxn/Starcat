@@ -88122,6 +88122,57 @@
         }
       }
     },
+    "batchAI.panel.review.modelOrigin.jev" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jev"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jev"
+          }
+        }
+      }
+    },
+    "batchAI.panel.review.modelOrigin.llm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LLM"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LLM"
+          }
+        }
+      }
+    },
+    "batchAI.panel.review.modelOrigin.unknown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unknown"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源未知"
+          }
+        }
+      }
+    },
     "batchAI.panel.review.tagOrigin.created" : {
       "extractionState" : "manual",
       "localizations" : {

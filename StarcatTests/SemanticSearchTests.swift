@@ -263,7 +263,7 @@ struct RepoAIInsightTests {
         let raw = """
         {
           "suggestedTags": [
-            {"name": "local-ai", "confidence": 0.82, "reason": "本地模型相关"}
+            {"name": "local-ai", "confidence": 0.82, "reason": "本地模型相关", "engine": "jev"}
           ]
         }
         """
@@ -271,6 +271,7 @@ struct RepoAIInsightTests {
         let tags = try RepoAIInsightService.decodeTagSuggestions(json: raw)
         #expect(tags.count == 1)
         #expect(tags[0].name == "local-ai")
+        #expect(tags[0].engine == .llm)
     }
 
     @Test("AI Tags: snake_case、缺 reason、字符串数组也能解析")
@@ -284,6 +285,7 @@ struct RepoAIInsightTests {
         let names = #"["macOS","Swift"]"#
         let nameTags = try RepoAIInsightService.decodeTagSuggestions(json: names)
         #expect(nameTags.map(\.name) == ["macOS", "Swift"])
+        #expect(nameTags.allSatisfy { $0.engine == .llm })
     }
 
     @Test("AI Tags: 批量建议按 repo_id 解码")
@@ -295,7 +297,17 @@ struct RepoAIInsightTests {
         )
         #expect(result[1]?.first?.name == "Swift")
         #expect(result[1]?.first?.confidence == 0.96)
+        #expect(result[1]?.first?.engine == .llm)
         #expect(result[2]?.isEmpty == true)
+    }
+
+    @Test("AI Tags: 旧草稿缺少引擎字段仍可解码")
+    func decodesLegacyTagSuggestionWithoutEngine() throws {
+        let data = Data(#"{"name":"Swift","confidence":0.9,"reason":"legacy"}"#.utf8)
+        let suggestion = try JSONDecoder().decode(AITagSuggestion.self, from: data)
+
+        #expect(suggestion.name == "Swift")
+        #expect(suggestion.engine == nil)
     }
 
     @Test("AI Tags: 批量建议漏回或重复 repo_id 时拒绝整批")
@@ -351,7 +363,12 @@ struct RepoAIInsightTests {
     @Test("AI Tags: 本地策略优先复用标准拼写并限制新标签")
     func normalizesTagSuggestionsAgainstVocabulary() {
         let raw = [
-            AITagSuggestion(name: "  open source ", confidence: 0.95, reason: "  开源项目  "),
+            AITagSuggestion(
+                name: "  open source ",
+                confidence: 0.95,
+                reason: "  开源项目  ",
+                engine: .jev
+            ),
             AITagSuggestion(name: "ai", confidence: 0.94, reason: "AI 相关"),
             AITagSuggestion(name: "SWIFT", confidence: 0.93, reason: "Swift 项目"),
             AITagSuggestion(name: "new-domain", confidence: 0.92, reason: "新领域"),
@@ -368,6 +385,7 @@ struct RepoAIInsightTests {
         // 已有标签优先占据 3 个槽位；大小写 / 空白 / 连字符形式恢复为词表标准名称。
         #expect(normalized.map(\.name) == ["Open-Source", "AI", "Swift"])
         #expect(normalized[0].reason == "开源项目")
+        #expect(normalized[0].engine == .jev)
     }
 
     @Test("AI Tags: 已有标签不足时至多保留一个新标签")

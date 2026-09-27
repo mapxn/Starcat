@@ -771,8 +771,8 @@ struct BatchAIQueueServiceTests {
     }
 
     private static let sampleSuggestions = [
-        AITagSuggestion(name: "Swift", confidence: 0.96, reason: "主要开发语言"),
-        AITagSuggestion(name: "CLI", confidence: 0.82, reason: "提供命令行工具")
+        AITagSuggestion(name: "Swift", confidence: 0.96, reason: "主要开发语言", engine: .jev),
+        AITagSuggestion(name: "CLI", confidence: 0.82, reason: "提供命令行工具", engine: .llm)
     ]
 
     private func makeRepos(count: Int, startingAt firstID: Int64) -> [Repo] {

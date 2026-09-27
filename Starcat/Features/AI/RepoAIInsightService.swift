@@ -1909,10 +1909,10 @@ final class RepoAIInsightService {
         let json = extractJSONObject(from: raw)
         guard let data = json.data(using: .utf8) else { throw RepoAIInsightError.invalidJSON }
         if let envelope = try? JSONDecoder().decode(AITagSuggestionEnvelope.self, from: data) {
-            return envelope.suggestedTags
+            return markAsLLMGenerated(envelope.suggestedTags)
         }
         if let list = try? JSONDecoder().decode([AITagSuggestion].self, from: data) {
-            return list
+            return markAsLLMGenerated(list)
         }
         // Anthropic / 中转常给 snake_case、缺 reason、或把标签写成字符串数组。
         guard let parsed = try? JSONSerialization.jsonObject(with: data),
@@ -1920,7 +1920,7 @@ final class RepoAIInsightService {
         else {
             throw RepoAIInsightError.invalidJSON
         }
-        return tags
+        return markAsLLMGenerated(tags)
     }
 
     nonisolated static func decodeBatchTagSuggestions(
@@ -1936,12 +1936,23 @@ final class RepoAIInsightService {
             for result in envelope.results {
                 // 漏项不能伪装成“没有标签”，重复项也不能静默覆盖前一个结果。
                 guard decoded[result.repoID] == nil else { throw RepoAIInsightError.invalidJSON }
-                decoded[result.repoID] = result.suggestedTags
+                decoded[result.repoID] = markAsLLMGenerated(result.suggestedTags)
             }
             guard Set(decoded.keys) == expectedRepoIDs else { throw RepoAIInsightError.invalidJSON }
             return decoded
         } catch {
             throw RepoAIInsightError.invalidJSON
+        }
+    }
+
+    /// 来源在本地调用边界统一盖章，避免模型输出伪造 `engine` 后在审核界面冒充 Jev。
+    private nonisolated static func markAsLLMGenerated(
+        _ suggestions: [AITagSuggestion]
+    ) -> [AITagSuggestion] {
+        suggestions.map { suggestion in
+            var stamped = suggestion
+            stamped.engine = .llm
+            return stamped
         }
     }
 

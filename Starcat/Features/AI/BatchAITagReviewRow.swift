@@ -248,6 +248,9 @@ struct BatchAITagReviewRow: View {
             )
             .foregroundStyle(.secondary)
             .monospacedDigit()
+            Text(engineTitleKey(for: suggestion))
+                .font(interfaceScale.font(.captionSmall))
+                .foregroundStyle(.secondary)
             if let availabilityKey = availabilityTitleKey(for: suggestion) {
                 Text(availabilityKey)
                     .font(interfaceScale.font(.captionSmall))
@@ -290,6 +293,9 @@ struct BatchAITagReviewRow: View {
                 )
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+                Text(engineTitleKey(for: suggestion))
+                    .font(interfaceScale.font(.captionSmall))
+                    .foregroundStyle(.secondary)
                 if let availabilityKey = availabilityTitleKey(for: suggestion) {
                     Text(availabilityKey)
                         .font(interfaceScale.font(.captionSmall))
@@ -307,6 +313,18 @@ struct BatchAITagReviewRow: View {
         .disabled(!canEditSelection)
         .help(suggestion.name)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// 来源与“已有 / 需新建”是两个正交维度；旧草稿缺字段时必须明确显示未知，不能猜成 LLM。
+    private func engineTitleKey(for suggestion: AITagSuggestion) -> LocalizedStringKey {
+        switch suggestion.engine {
+        case .some(.jev):
+            return "batchAI.panel.review.modelOrigin.jev"
+        case .some(.llm):
+            return "batchAI.panel.review.modelOrigin.llm"
+        case .none:
+            return "batchAI.panel.review.modelOrigin.unknown"
+        }
     }
 
     /// 来源读取失败时不显示标识，避免把未知状态误报为“需新建”。
