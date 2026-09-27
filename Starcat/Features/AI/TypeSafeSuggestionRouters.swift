@@ -11,9 +11,8 @@
 //    路由,业务文件(会话 / 队列 / 服务)零改动。
 //
 //  路由边界(POC 安全边界):
-//  - 分组:仅 `session.mode == .manual`(用户手动整理 / 多选批量整理 / 手动草稿恢复)
-//    走 Jev;AutoTidyScheduler 的自动整理与 auto-apply 继续走 LLM,自动写入链路
-//    完全不接触 Jev;
+//  - 分组：手动整理与 AutoTidyScheduler 后台自动分组共用 Jev-first 路由；Jev 只
+//    返回候选概率，封闭集校验、置信度阈值与写入规则仍由现有会话负责；
 //  - 标签：所有标签生成入口统一先让 Jev 对现有词表打分；结果不足且业务策略允许新增时，
 //    才按需调用一次 LLM 生成词表外的新标签，新标签不再回送 Jev 做二次否决；
 //  - 失败语义:Jev 失败不静默回退 LLM(双跑烧两份钱 + 加倍延迟),错误沿既有
@@ -26,32 +25,22 @@ import Foundation
 
 /// `GitHubStarListAIGroupingSession` 的 Provider 路由层。
 ///
-/// 会话在 AppDependencies 里只构造一次,手动窗口与 AutoTidyScheduler 共享同一
-/// 实例,因此「只让手动整理走 Jev」必须在 Provider 层按会话当前 mode 分流:
-/// AppDependencies 构造完会话后调用 `attachSession(_:)` 回填探针。
+/// 手动窗口与 AutoTidyScheduler 共享同一 Provider，因此这里只按 Labs 配置与凭据
+/// 决定是否使用 Jev；调用来源对应的审核、阈值和自动写入边界继续留在会话层。
 @MainActor
 final class TypeSafeGitHubListSuggestionRouter: GitHubStarListSuggestionProviding {
     private let llmProvider: any GitHubStarListSuggestionProviding
     private let typesafeProvider: TypeSafeDecisionService
     private let settings: AppSettings
-    /// 当前调用是否发生在手动整理上下文。默认 false(未挂接 → 一律 LLM,安全侧)。
-    private var isManualInvocation: () -> Bool
 
     init(
         llmProvider: any GitHubStarListSuggestionProviding,
         typesafeProvider: TypeSafeDecisionService,
-        settings: AppSettings,
-        isManualInvocation: @escaping () -> Bool = { false }
+        settings: AppSettings
     ) {
         self.llmProvider = llmProvider
         self.typesafeProvider = typesafeProvider
         self.settings = settings
-        self.isManualInvocation = isManualInvocation
-    }
-
-    /// AppDependencies 构造会话后回填;weak 引用避免路由器与会话互相持有。
-    func attachSession(_ session: GitHubStarListAIGroupingSession) {
-        isManualInvocation = { [weak session] in session?.mode == .manual }
     }
 
     private var shouldRouteToTypesafe: Bool {
@@ -66,7 +55,7 @@ final class TypeSafeGitHubListSuggestionRouter: GitHubStarListSuggestionProvidin
         existingListIDsByRepo: [Int64: Set<String>],
         existingListNamesByRepo: [Int64: [String]]
     ) async throws -> [Int64: [GitHubStarListAISuggestion]] {
-        if isManualInvocation() && shouldRouteToTypesafe {
+        if shouldRouteToTypesafe {
             do {
                 return try await typesafeProvider.generateGitHubListSuggestions(
                     for: repos,

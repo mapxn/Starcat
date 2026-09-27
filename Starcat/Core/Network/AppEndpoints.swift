@@ -672,6 +672,27 @@ enum AppEndpoints {
         }
     }
 
+    // MARK: - 外部公开 API：OpenRouter Decisions(Jev fallback)
+
+    /// OpenRouter 的结构化 Decisions API。
+    ///
+    /// 这里刻意不复用 AI Provider profile 的可编辑 Base URL：
+    /// - Decisions API 不属于 OpenAI-compatible `/api/v1` 路径；
+    /// - OpenRouter Key 只能发送到官方固定域名，避免自定义地址意外接收用户凭据；
+    /// - `typesafe/jev-router` 是 Chat Completions 路由模型，不符合本模块的 Noul 决策协议。
+    enum OpenRouterDecisions {
+        static let productionURL = URL(string: "https://openrouter.ai")!
+
+        enum Paths {
+            /// `POST /api/alpha/decisions` —— state + questions → Jev 类型化答案。
+            static let decisions = "/api/alpha/decisions"
+        }
+
+        static func url(_ path: String) -> URL {
+            appendPath(path, to: productionURL)
+        }
+    }
+
     // MARK: - Private
 
     /// 自建后端 baseURL 解析：用户设置过 → 用之；否则回退 production。

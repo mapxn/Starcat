@@ -1194,7 +1194,8 @@ final class AppDependencies {
         // 注：onTagsChanged 由 HomeView 在 environment 注入后挂接，刷新 Sidebar 计数。
         let aiOrganizationDraftRepository = GRDBAIOrganizationDraftRepository(database: db)
 
-        // 分组仍保留独立路由：只影响手动分组，不改变 GitHub Lists 自动落库边界。
+        // 分组保留独立路由：手动与后台自动分组统一 Jev-first，但候选校验、阈值与
+        // GitHub Lists 写入边界仍由 GitHubStarListAIGroupingSession 负责。
         let typesafeGroupingRouter = TypeSafeGitHubListSuggestionRouter(
             llmProvider: aiInsight,
             typesafeProvider: typesafeDecisionService,
@@ -1219,9 +1220,6 @@ final class AppDependencies {
             entitlementGate: self.entitlementGate,
             draftRepository: aiOrganizationDraftRepository
         )
-        // 会话与路由器互持会造成引用循环，因此构造后回填 weak 探针，
-        // 让路由器能读到当前 mode（手动走 Jev / 自动走 LLM）。
-        typesafeGroupingRouter.attachSession(self.githubStarListAIGroupingSession)
 
         // HOM-126：自动后台 AI 整理调度器。
         // 装配顺序：必须晚于 settings / repoRepository / batchService / syncManager。

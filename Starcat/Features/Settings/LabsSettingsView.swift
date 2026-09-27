@@ -15,7 +15,11 @@
 //  - API Key 走 `KeychainManager` service key 机制(serviceID = typesafe-ai),
 //    草稿编辑不落盘,「测试连接」成功才持久化(与 ServicesSettings 的
 //    「保存合并进测试」约定一致);清空输入框立即删除已存 Key;
-//  - 测试失败不保存、不自动开启任何开关。
+//  - 原生 TypeSafe Key 为空或最近一次显式测试失败时，可复用已验证的 OpenRouter
+//    profile；fallback 只读取已有 Key，不复制、不改写 provider 配置，也不使用其
+//    可编辑 Base URL；
+//  - 原生测试失败只记录路由状态，不删除 Key、不自动开启任何开关；普通业务请求失败
+//    也不会触发双跑，避免瞬时故障产生双份费用与延迟。
 //
 
 import SwiftUI
@@ -25,15 +29,35 @@ struct LabsSettingsTab: View {
     @Environment(AppSettings.self) private var settings
 
     @State private var draftAPIKey = ""
+    @State private var hasStoredNativeAPIKey = false
     @State private var revealAPIKey = false
     @State private var testState: TestState = .idle
+    @State private var openRouterFallback: TypeSafeDecisionAccess?
 
-    /// 测试连接的会话级结果;不写入任何持久化。
+    /// 测试结果本身只在会话内展示；原生 Key 是否应被 fallback 跳过由 AppSettings 持久化。
     private enum TestState: Equatable {
         case idle
         case testing
-        case succeeded(elapsedMilliseconds: Int, noul: Double)
+        case succeeded(source: TestSource, elapsedMilliseconds: Int, noul: Double)
         case failed(String)
+    }
+
+    private enum TestSource: Equatable {
+        case typeSafe
+        case openRouter(profileName: String)
+    }
+
+    private struct ConnectionProbeResult {
+        let elapsedMilliseconds: Int
+        let noul: Double
+    }
+
+    private enum ConnectionProbeError: LocalizedError {
+        case missingAnswer
+
+        var errorDescription: String? {
+            String.l10n("settings.labs.typesafe.test.missingAnswer")
+        }
     }
 
     var body: some View {
@@ -49,7 +73,7 @@ struct LabsSettingsTab: View {
         }
         .formStyle(.grouped)
         .task {
-            loadStoredAPIKey()
+            loadConfiguration()
         }
         .onChange(of: draftAPIKey) { _, newValue in
             testState = .idle
@@ -59,7 +83,13 @@ struct LabsSettingsTab: View {
                 try? KeychainManager.shared.deleteServiceAPIKey(
                     forService: TypeSafeDecisionService.keychainServiceID
                 )
+                hasStoredNativeAPIKey = false
+                // 已无原生 Key 时失败标记没有意义；fallback 原因回到「未配置」。
+                settings.typesafeNativeKeyTestFailed = false
             }
+        }
+        .onChange(of: openRouterProfileRevision) { _, _ in
+            refreshOpenRouterFallback()
         }
     }
 
@@ -69,14 +99,16 @@ struct LabsSettingsTab: View {
         @Bindable var settings = settings
         return Section {
             Toggle("settings.labs.typesafe.enable", isOn: $settings.typesafeDecisionEnabled)
-            Text("settings.labs.typesafe.enable.description")
+            Text("settings.labs.typesafe.enable.unified.description")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             if settings.typesafeDecisionEnabled {
-                // Key 未配置时给出显式回退提示:开关已开但所有路由仍在走 LLM。
-                if storedOrDraftKeyIsEmpty {
-                    Label("settings.labs.typesafe.noKey", systemImage: "exclamationmark.triangle")
+                openRouterFallbackRow
+
+                // 两条 Jev 凭据路径都不可用时，明确告知业务会回退原 AI Provider。
+                if !hasUsableCredential {
+                    Label("settings.labs.typesafe.noAvailableRoute", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -87,17 +119,17 @@ struct LabsSettingsTab: View {
 
                 testConnectionRow
 
-                Toggle("settings.labs.typesafe.grouping", isOn: $settings.typesafeGroupingSuggestionsEnabled)
-                Text("settings.labs.typesafe.grouping.description")
+                Toggle("settings.labs.typesafe.grouping.unified", isOn: $settings.typesafeGroupingSuggestionsEnabled)
+                Text("settings.labs.typesafe.grouping.unified.description")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Toggle("settings.labs.typesafe.tags", isOn: $settings.typesafeTagSuggestionsEnabled)
-                Text("settings.labs.typesafe.tags.hybrid.description")
+                Toggle("settings.labs.typesafe.tags.unified", isOn: $settings.typesafeTagSuggestionsEnabled)
+                Text("settings.labs.typesafe.tags.unified.description")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("settings.labs.typesafe.scope.note")
+                Text("settings.labs.typesafe.scope.unified.note")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -109,13 +141,51 @@ struct LabsSettingsTab: View {
         }
     }
 
+    // MARK: - OpenRouter fallback 状态
+
+    @ViewBuilder
+    private var openRouterFallbackRow: some View {
+        if let fallback = openRouterFallback,
+           let profileName = fallback.openRouterProfileDisplayName {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: openRouterStatusImage)
+                    .foregroundStyle(openRouterStatusColor)
+                    .frame(width: 20, height: 20)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(openRouterStatusTitle(profileName: profileName))
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("settings.labs.typesafe.openRouter.available.description")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "network.slash")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("settings.labs.typesafe.openRouter.unavailable")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("settings.labs.typesafe.openRouter.unavailable.description")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     // MARK: - API Key 行
 
     @ViewBuilder
     private var apiKeyRows: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("settings.labs.typesafe.apiKey")
+                Text("settings.labs.typesafe.apiKey.optional")
                     .font(.callout.weight(.medium))
                 Spacer()
                 Link("settings.labs.typesafe.apiKey.get", destination: Self.consoleKeysURL)
@@ -156,16 +226,39 @@ struct LabsSettingsTab: View {
         return VStack(alignment: .leading, spacing: 4) {
             Text("settings.labs.typesafe.model")
                 .font(.callout.weight(.medium))
-            TextField(
-                "",
-                text: $settings.typesafeModelID,
-                prompt: Text(TypeSafeDecisionService.defaultModelID)
-            )
-            .labelsHidden()
-            .textFieldStyle(.roundedBorder)
-            Text("settings.labs.typesafe.model.description")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if let fallback = activeOpenRouterFallback {
+                Text(fallback.modelID)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                if let profileName = fallback.openRouterProfileDisplayName {
+                    Text(
+                        String(
+                            format: String.l10n("settings.labs.typesafe.model.openRouterFormat"),
+                            profileName
+                        )
+                    )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                TextField(
+                    "",
+                    text: $settings.typesafeModelID,
+                    prompt: Text(TypeSafeDecisionService.defaultModelID)
+                )
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+            }
+            if activeOpenRouterFallback != nil {
+                Text("settings.labs.typesafe.model.openRouterDescription")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("settings.labs.typesafe.model.description")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -199,16 +292,10 @@ struct LabsSettingsTab: View {
         switch testState {
         case .idle, .testing:
             EmptyView()
-        case let .succeeded(milliseconds, noul):
+        case let .succeeded(source, milliseconds, noul):
             Label(
                 title: {
-                    Text(
-                        String(
-                            format: String.l10n("settings.labs.typesafe.test.successFormat"),
-                            NSNumber(value: milliseconds),
-                            String(format: "%.2f", noul)
-                        )
-                    )
+                    successFeedback(source: source, milliseconds: milliseconds, noul: noul)
                 },
                 icon: { Image(systemName: "checkmark.circle.fill") }
             )
@@ -222,12 +309,43 @@ struct LabsSettingsTab: View {
         }
     }
 
+    private func successFeedback(source: TestSource, milliseconds: Int, noul: Double) -> Text {
+        let probability = String(format: "%.2f", noul)
+        switch source {
+        case .typeSafe:
+            return Text(
+                String(
+                    format: String.l10n("settings.labs.typesafe.test.successFormat"),
+                    NSNumber(value: milliseconds),
+                    probability
+                )
+            )
+        case let .openRouter(profileName):
+            return Text(
+                String(
+                    format: String.l10n("settings.labs.typesafe.test.openRouterSuccessFormat"),
+                    profileName,
+                    NSNumber(value: milliseconds),
+                    probability
+                )
+            )
+        }
+    }
+
     // MARK: - 动作
 
     private static let consoleKeysURL = URL(string: "https://console.typesafe.ai/settings/keys")!
 
-    private var storedOrDraftKeyIsEmpty: Bool {
-        trimmedDraftKey.isEmpty
+    private var nativeCredentialIsUsable: Bool {
+        hasStoredNativeAPIKey && !settings.typesafeNativeKeyTestFailed
+    }
+
+    private var hasUsableCredential: Bool {
+        nativeCredentialIsUsable || openRouterFallback != nil
+    }
+
+    private var activeOpenRouterFallback: TypeSafeDecisionAccess? {
+        nativeCredentialIsUsable ? nil : openRouterFallback
     }
 
     private var trimmedDraftKey: String {
@@ -235,63 +353,165 @@ struct LabsSettingsTab: View {
     }
 
     private var canTest: Bool {
-        testState != .testing && !trimmedDraftKey.isEmpty
+        testState != .testing && (!trimmedDraftKey.isEmpty || openRouterFallback != nil)
     }
 
-    private func loadStoredAPIKey() {
-        draftAPIKey = (try? KeychainManager.shared.loadServiceAPIKey(
+    private var openRouterStatusImage: String {
+        settings.typesafeNativeKeyTestFailed && hasStoredNativeAPIKey
+            ? "exclamationmark.triangle.fill"
+            : "checkmark.circle.fill"
+    }
+
+    private var openRouterStatusColor: Color {
+        settings.typesafeNativeKeyTestFailed && hasStoredNativeAPIKey ? .orange : .green
+    }
+
+    private func openRouterStatusTitle(profileName: String) -> String {
+        let key: String
+        if settings.typesafeNativeKeyTestFailed && hasStoredNativeAPIKey {
+            key = "settings.labs.typesafe.openRouter.activeFailedFormat"
+        } else if !hasStoredNativeAPIKey {
+            key = "settings.labs.typesafe.openRouter.activeMissingKeyFormat"
+        } else {
+            key = "settings.labs.typesafe.openRouter.readyFormat"
+        }
+        return String(format: String.l10n(key), profileName)
+    }
+
+    /// 只追踪会影响 fallback 资格与展示的字段，避免比较 profile 内最多 300 个模型。
+    private var openRouterProfileRevision: [String] {
+        settings.aiProviderProfiles
+            .filter { $0.provider == .openRouter }
+            .map {
+                [
+                    $0.id,
+                    $0.displayName,
+                    String($0.isEnabled),
+                    String($0.lastTestStatus.isSuccess),
+                    $0.lastTestedAt ?? ""
+                ].joined(separator: "|")
+            }
+    }
+
+    private func loadConfiguration() {
+        let storedAPIKey = (try? KeychainManager.shared.loadServiceAPIKey(
             forService: TypeSafeDecisionService.keychainServiceID
         )) ?? ""
+        draftAPIKey = storedAPIKey
+        hasStoredNativeAPIKey = !storedAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !hasStoredNativeAPIKey {
+            settings.typesafeNativeKeyTestFailed = false
+        }
+        refreshOpenRouterFallback()
     }
 
-    /// 用草稿 Key 发一次真实 Noul 决策(同时验证鉴权与决策延迟)。
-    /// 成功才落盘;失败不保存、不改开关。清空草稿时立即删除已存 Key。
+    private func refreshOpenRouterFallback() {
+        openRouterFallback = TypeSafeDecisionService.resolveOpenRouterFallback(
+            settings: settings,
+            keychain: KeychainManager.shared
+        )
+    }
+
+    /// 优先测试输入框里的原生 TypeSafe Key；失败且有 OpenRouter fallback 时，在同一次
+    /// 用户操作内验证 fallback。原生失败状态会持久化，但 Key 本身保留供后续修正重试。
     private func testConnection() {
         let candidate = trimmedDraftKey
-        guard !candidate.isEmpty else { return }
+        guard let access = TypeSafeDecisionService.resolveAccess(
+            settings: settings,
+            keychain: KeychainManager.shared,
+            nativeAPIKeyOverride: candidate
+        ) else { return }
+        let fallbackAccess = openRouterFallback
         testState = .testing
 
         Task {
-            // 探测用一次性 client:不依赖 AppDependencies 装配,设置页可独立使用。
-            let client = TypeSafeClient()
-            let clock = ContinuousClock()
             do {
-                let start = clock.now
-                let response = try await client.evaluate(
-                    state: "Starcat is a native macOS application for managing GitHub stars.",
-                    model: resolvedModelID,
-                    questions: [
-                        "demo": .noul(
-                            instructions: "Does this text describe a software product?",
-                            criteria: nil
-                        )
-                    ],
-                    apiKey: candidate,
-                    operation: .connectionTest
-                )
-                let elapsed = clock.now - start
-                let milliseconds = Int(elapsed.components.seconds) * 1_000
-                    + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
-
-                guard let noul = response.answers["demo"]?.noul, noul.isFinite else {
-                    testState = .failed(String.l10n("settings.labs.typesafe.test.missingAnswer"))
-                    return
-                }
-                try? KeychainManager.shared.storeServiceAPIKey(
-                    candidate,
-                    forService: TypeSafeDecisionService.keychainServiceID
-                )
-                testState = .succeeded(elapsedMilliseconds: milliseconds, noul: noul)
+                let result = try await probeConnection(using: access)
+                recordSuccessfulConnection(access: access, result: result)
             } catch is CancellationError {
                 testState = .idle
             } catch {
-                testState = .failed(error.localizedDescription)
+                guard access.api == .typeSafe else {
+                    testState = .failed(error.localizedDescription)
+                    return
+                }
+
+                let nativeError = error
+                settings.typesafeNativeKeyTestFailed = true
+                guard let fallbackAccess else {
+                    testState = .failed(nativeError.localizedDescription)
+                    return
+                }
+
+                do {
+                    let result = try await probeConnection(using: fallbackAccess)
+                    recordSuccessfulConnection(access: fallbackAccess, result: result)
+                } catch is CancellationError {
+                    testState = .idle
+                } catch {
+                    testState = .failed(
+                        String(
+                            format: String.l10n("settings.labs.typesafe.test.bothFailedFormat"),
+                            nativeError.localizedDescription,
+                            error.localizedDescription
+                        )
+                    )
+                }
             }
         }
     }
 
-    private var resolvedModelID: String {
-        let trimmed = settings.typesafeModelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? TypeSafeDecisionService.defaultModelID : trimmed
+    /// 一次探测只验证一个明确的凭据来源；是否继续 fallback 由调用者决定，避免业务请求
+    /// 复用这里的双探测语义。
+    private func probeConnection(using access: TypeSafeDecisionAccess) async throws -> ConnectionProbeResult {
+        // 一次性 client 不依赖 AppDependencies 装配，设置页可以独立验证两条固定 API 路径。
+        let client = TypeSafeClient()
+        let clock = ContinuousClock()
+        let start = clock.now
+        let response = try await client.evaluate(
+            state: "Starcat is a native macOS application for managing GitHub stars.",
+            model: access.modelID,
+            questions: [
+                "demo": .noul(
+                    instructions: "Does this text describe a software product?",
+                    criteria: nil
+                )
+            ],
+            apiKey: access.apiKey,
+            api: access.api,
+            operation: .connectionTest
+        )
+        let elapsed = clock.now - start
+        let milliseconds = Int(elapsed.components.seconds) * 1_000
+            + Int(elapsed.components.attoseconds / 1_000_000_000_000_000)
+
+        guard let noul = response.answers["demo"]?.noul, noul.isFinite else {
+            throw ConnectionProbeError.missingAnswer
+        }
+        return ConnectionProbeResult(elapsedMilliseconds: milliseconds, noul: noul)
+    }
+
+    private func recordSuccessfulConnection(
+        access: TypeSafeDecisionAccess,
+        result: ConnectionProbeResult
+    ) {
+        let source: TestSource
+        switch access.source {
+        case .typeSafe:
+            try? KeychainManager.shared.storeServiceAPIKey(
+                access.apiKey,
+                forService: TypeSafeDecisionService.keychainServiceID
+            )
+            hasStoredNativeAPIKey = true
+            settings.typesafeNativeKeyTestFailed = false
+            source = .typeSafe
+        case let .openRouter(_, displayName):
+            source = .openRouter(profileName: displayName)
+        }
+        testState = .succeeded(
+            source: source,
+            elapsedMilliseconds: result.elapsedMilliseconds,
+            noul: result.noul
+        )
     }
 }

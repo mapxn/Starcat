@@ -2,7 +2,7 @@
 //  TypeSafeClient.swift
 //  Starcat
 //
-//  TypeSafe AI(Jev "System One" 决策模型)REST 客户端 —— 实验性功能(Labs)。
+//  TypeSafe AI(Jev)结构化决策 REST 客户端 —— 实验性功能(Labs)。
 //
 //  设计约束:
 //  - Jev 不是 LLM:不生成文本,只对结构化 state 回答类型化问题(Noul 二元概率 /
@@ -24,7 +24,7 @@ import Foundation
 
 // MARK: - 错误
 
-/// TypeSafe API 领域错误。
+/// Jev 结构化决策 API 领域错误（原生 TypeSafe 与 OpenRouter 共用）。
 enum TypeSafeClientError: Error, Equatable, Sendable {
     /// 未配置 API Key(调用前应先路由回退到 LLM 路径,这里是兜底)。
     case missingAPIKey
@@ -78,23 +78,23 @@ extension TypeSafeClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "TypeSafe API key is not configured"
+            return "Jev decision API key is not configured"
         case .unauthorized:
-            return "TypeSafe API rejected the key (401)"
+            return "Jev decision API rejected the key (401)"
         case let .validation(detail):
-            return "TypeSafe API validation error (422): \(detail)"
+            return "Jev decision API validation error (422): \(detail)"
         case let .rateLimited(seconds):
-            return "TypeSafe API rate limited (429)\(seconds.map { " after \($0)s" } ?? "")"
+            return "Jev decision API rate limited (429)\(seconds.map { " after \($0)s" } ?? "")"
         case let .overloaded(seconds):
-            return "TypeSafe API overloaded (529)\(seconds.map { " after \($0)s" } ?? "")"
+            return "Jev decision API overloaded (529)\(seconds.map { " after \($0)s" } ?? "")"
         case let .server(code):
-            return "TypeSafe API server error (\(code))"
+            return "Jev decision API server error (\(code))"
         case let .transport(message):
-            return "TypeSafe API transport error: \(message)"
+            return "Jev decision API transport error: \(message)"
         case let .decoding(message):
-            return "TypeSafe API response decoding failed: \(message)"
+            return "Jev decision API response decoding failed: \(message)"
         case let .invalidAnswer(questionID):
-            return "TypeSafe API returned an invalid Noul answer for \(questionID)"
+            return "Jev decision API returned an invalid Noul answer for \(questionID)"
         }
     }
 }
@@ -212,6 +212,15 @@ enum TypeSafeEvaluationOperation: String, Sendable {
     case connectionTest = "connection_test"
 }
 
+/// Jev 结构化决策的承载 API。
+///
+/// 两条路径共享请求 / 响应协议，但 URL 与模型命名空间不同；用枚举让调用方显式选择，
+/// 避免把 OpenRouter 的 Chat Completions 模型误接到 Noul 决策链路。
+enum TypeSafeDecisionAPI: String, Equatable, Sendable {
+    case typeSafe = "typesafe"
+    case openRouter = "openrouter"
+}
+
 // MARK: - 客户端
 
 /// TypeSafe API 独立 actor 客户端。
@@ -230,16 +239,19 @@ actor TypeSafeClient {
     private static let backoffBaseSeconds: Double = 0.5
     private static let backoffJitterUpperBound: Double = 0.25
 
-    private let baseURL: URL
+    private let typeSafeBaseURL: URL
+    private let openRouterBaseURL: URL
     private let session: URLSession
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
     init(
         baseURL: URL = AppEndpoints.TypeSafe.productionURL,
+        openRouterBaseURL: URL = AppEndpoints.OpenRouterDecisions.productionURL,
         session: URLSession? = nil
     ) {
-        self.baseURL = baseURL
+        self.typeSafeBaseURL = baseURL
+        self.openRouterBaseURL = openRouterBaseURL
         if let session {
             self.session = session
         } else {
@@ -260,11 +272,13 @@ actor TypeSafeClient {
     ///   - model: 固定版本模型 ID,由 `TypeSafeDecisionService` 统一解析。
     ///   - questions: question id → 问题;共享同一 state,一次请求并行评估。
     ///   - apiKey: BYOK,逐次传入。
+    ///   - api: 原生 TypeSafe 或 OpenRouter Decisions；默认保持原生行为。
     func evaluate<State: Encodable>(
         state: State,
         model: String,
         questions: [String: TypeSafeQuestion],
         apiKey: String,
+        api: TypeSafeDecisionAPI = .typeSafe,
         operation: TypeSafeEvaluationOperation = .unspecified
     ) async throws -> TypeSafeSystemOneResponse {
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -274,11 +288,17 @@ actor TypeSafeClient {
             TypeSafeSystemOneRequestBody(state: state, model: model, questions: questions)
         )
 
-        // path 常量来自 AppEndpoints(单一来源);基底用注入的 baseURL,
-        // 测试可注入假域名拦截,不碰生产端点。
+        // 两种 API 的 URL 都来自 AppEndpoints；基底可注入，测试能拦截两条路径，
+        // 不需要触碰真实 TypeSafe / OpenRouter 服务。
+        let target: (baseURL: URL, path: String) = switch api {
+        case .typeSafe:
+            (typeSafeBaseURL, AppEndpoints.TypeSafe.Paths.systemOne)
+        case .openRouter:
+            (openRouterBaseURL, AppEndpoints.OpenRouterDecisions.Paths.decisions)
+        }
         let url = AppEndpoints.appendPath(
-            AppEndpoints.TypeSafe.Paths.systemOne,
-            to: baseURL
+            target.path,
+            to: target.baseURL
         )
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -290,6 +310,7 @@ actor TypeSafeClient {
         return try await sendWithRetry(
             request,
             questionCount: questions.count,
+            api: api,
             operation: operation
         )
     }
@@ -301,6 +322,7 @@ actor TypeSafeClient {
     private func sendWithRetry(
         _ request: URLRequest,
         questionCount: Int,
+        api: TypeSafeDecisionAPI,
         operation: TypeSafeEvaluationOperation
     ) async throws -> TypeSafeSystemOneResponse {
         let startedAt = ContinuousClock.now
@@ -312,6 +334,7 @@ actor TypeSafeClient {
         let logMetrics: (String, TypeSafeUsage?, String?) -> Void = { outcome, usage, errorKind in
             Self.logRequestMetrics(
                 outcome: outcome,
+                api: api,
                 operation: operation,
                 startedAt: startedAt,
                 questionCount: questionCount,
@@ -366,6 +389,7 @@ actor TypeSafeClient {
 
     private static func logRequestMetrics(
         outcome: String,
+        api: TypeSafeDecisionAPI,
         operation: TypeSafeEvaluationOperation,
         startedAt: ContinuousClock.Instant,
         questionCount: Int,
@@ -382,7 +406,7 @@ actor TypeSafeClient {
         let outputTokens = usage?.outputTokens ?? 0
         let errorKind = errorKind ?? "none"
         AppLog.ai.debug(
-            "[typesafe] operation=\(operation.rawValue, privacy: .public) outcome=\(outcome, privacy: .public) latency_ms=\(latencyMilliseconds, privacy: .public) questions=\(questionCount, privacy: .public) attempts=\(attemptCount, privacy: .public) failures=\(failureCount, privacy: .public) rate_limits=\(rateLimitCount, privacy: .public) input_tokens=\(inputTokens, privacy: .public) output_tokens=\(outputTokens, privacy: .public) error_kind=\(errorKind, privacy: .public)"
+            "[typesafe] api=\(api.rawValue, privacy: .public) operation=\(operation.rawValue, privacy: .public) outcome=\(outcome, privacy: .public) latency_ms=\(latencyMilliseconds, privacy: .public) questions=\(questionCount, privacy: .public) attempts=\(attemptCount, privacy: .public) failures=\(failureCount, privacy: .public) rate_limits=\(rateLimitCount, privacy: .public) input_tokens=\(inputTokens, privacy: .public) output_tokens=\(outputTokens, privacy: .public) error_kind=\(errorKind, privacy: .public)"
         )
     }
 

@@ -25,6 +25,9 @@
 //    不进入执行判断;
 //  - Jev 只能从现有标签词表中选(无法造新标签),恰好匹配产品「复用优先」默认
 //    策略;这是 POC 的已知能力边界,不是缺陷。
+//  - 原生 TypeSafe Key 缺失或最近一次显式连接测试失败时，可复用已验证的 OpenRouter
+//    profile Key；调用的是 Decisions API，而不是生成式 Chat 模型 jev-router；
+//  - 普通业务请求失败不会自动双跑 OpenRouter，避免瞬时故障造成双份费用与延迟。
 //
 //  已知 POC 调参点(集中在此,便于后续调整):
 //  - 分组返回完整 Noul 概率,审核展示与自动应用阈值由产品 Policy 决定;
@@ -35,6 +38,35 @@
 
 import Foundation
 
+/// 一次 Jev 请求最终选中的凭据与承载 API。
+///
+/// `source` 把 OpenRouter profile 身份一起保留下来，供 Labs 设置页解释当前 fallback；
+/// API Key 只在内存中逐次传给 client，不写入 AppSettings 或日志。
+struct TypeSafeDecisionAccess: Equatable, Sendable {
+    enum Source: Equatable, Sendable {
+        case typeSafe
+        case openRouter(profileID: String, displayName: String)
+    }
+
+    let source: Source
+    let apiKey: String
+    let modelID: String
+
+    var api: TypeSafeDecisionAPI {
+        switch source {
+        case .typeSafe:
+            return .typeSafe
+        case .openRouter:
+            return .openRouter
+        }
+    }
+
+    var openRouterProfileDisplayName: String? {
+        guard case let .openRouter(_, displayName) = source else { return nil }
+        return displayName
+    }
+}
+
 @MainActor
 final class TypeSafeDecisionService {
 
@@ -44,6 +76,8 @@ final class TypeSafeDecisionService {
     static let keychainServiceID = "typesafe-ai"
     /// 官方建议:调过阈值后固定版本 ID,不用会漂移的 `jev-latest` alias。
     static let defaultModelID = "jev-1.13.0"
+    /// OpenRouter Decisions 使用独立模型命名空间；固定版本以避免阈值随 alias 漂移。
+    static let openRouterModelID = "typesafe/jev-1.13"
 
     private static let groupingReadmeLimit = 2_400
     private static let tagsReadmeLimit = 4_000
@@ -69,25 +103,80 @@ final class TypeSafeDecisionService {
         self.keychain = keychain
     }
 
-    // MARK: - Key / 模型解析
+    // MARK: - 凭据 / 模型解析
 
-    /// BYOK Key 是否已配置。路由器用它决定是否分流到 Jev;未配置时静默回退 LLM。
+    /// Jev 凭据是否可解析。路由器用它决定是否分流；两类凭据都缺失时静默回退 LLM。
     func canResolveAPIKey() -> Bool {
-        resolvedAPIKey() != nil
+        resolvedAccess() != nil
     }
 
-    private func resolvedAPIKey() -> String? {
-        guard let raw = try? keychain.loadServiceAPIKey(forService: Self.keychainServiceID) else {
-            return nil
+    /// 解析一次 Jev 调用来源。
+    ///
+    /// 顺序是「可用的原生 TypeSafe → OpenRouter fallback」。原生 Key 最近一次显式
+    /// 测试失败时会被保留但暂时跳过；普通业务请求错误不会修改此状态或自动双跑。
+    /// `nativeAPIKeyOverride` 仅供设置页测试尚未落盘的草稿；只要显式传入，就允许
+    /// 重测失败状态中的原生 Key，空字符串则跳过已存 Key 并检查 fallback。
+    static func resolveAccess(
+        settings: AppSettings,
+        keychain: any KeychainManaging,
+        nativeAPIKeyOverride: String? = nil
+    ) -> TypeSafeDecisionAccess? {
+        let rawNativeKey: String?
+        if let nativeAPIKeyOverride {
+            rawNativeKey = nativeAPIKeyOverride
+        } else {
+            rawNativeKey = try? keychain.loadServiceAPIKey(forService: Self.keychainServiceID)
         }
+
+        let mayUseNativeKey = nativeAPIKeyOverride != nil || !settings.typesafeNativeKeyTestFailed
+        if mayUseNativeKey, let nativeKey = normalizedKey(rawNativeKey) {
+            return TypeSafeDecisionAccess(
+                source: .typeSafe,
+                apiKey: nativeKey,
+                modelID: resolvedNativeModelID(settings: settings)
+            )
+        }
+
+        return resolveOpenRouterFallback(settings: settings, keychain: keychain)
+    }
+
+    /// 只接受已启用且连接测试成功的 OpenRouter profile，并按设置中的稳定顺序取第一项。
+    /// profile 的自定义 Base URL 不参与 Decisions 请求，防止把 Key 发往非官方主机。
+    static func resolveOpenRouterFallback(
+        settings: AppSettings,
+        keychain: any KeychainManaging
+    ) -> TypeSafeDecisionAccess? {
+        for profile in settings.aiProviderProfiles
+        where profile.provider == .openRouter && profile.isVerifiedConfiguration {
+            let rawKey = try? keychain.loadAIKey(forProvider: profile.id)
+            guard let apiKey = normalizedKey(rawKey) else { continue }
+            let displayName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return TypeSafeDecisionAccess(
+                source: .openRouter(
+                    profileID: profile.id,
+                    displayName: displayName.isEmpty ? "OpenRouter" : displayName
+                ),
+                apiKey: apiKey,
+                modelID: Self.openRouterModelID
+            )
+        }
+        return nil
+    }
+
+    private static func normalizedKey(_ raw: String?) -> String? {
+        guard let raw else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// 固定版本模型 ID;设置页留空回退默认。
-    private var resolvedModelID: String {
+    /// 原生 TypeSafe 固定版本模型 ID；设置页留空回退默认。
+    private static func resolvedNativeModelID(settings: AppSettings) -> String {
         let trimmed = settings.typesafeModelID.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? Self.defaultModelID : trimmed
+    }
+
+    private func resolvedAccess() -> TypeSafeDecisionAccess? {
+        Self.resolveAccess(settings: settings, keychain: keychain)
     }
 
     // MARK: - GitHub Lists 分组建议
@@ -111,10 +200,9 @@ final class TypeSafeDecisionService {
         }
         guard !eligibleCandidates.isEmpty else { return [:] }
 
-        guard let apiKey = resolvedAPIKey() else {
+        guard let access = resolvedAccess() else {
             throw TypeSafeClientError.missingAPIKey
         }
-        let model = resolvedModelID
 
         var results: [Int64: [GitHubStarListAISuggestion]] = [:]
         for repo in repos {
@@ -145,9 +233,10 @@ final class TypeSafeDecisionService {
 
             let response = try await client.evaluate(
                 state: state,
-                model: model,
+                model: access.modelID,
                 questions: questions,
-                apiKey: apiKey,
+                apiKey: access.apiKey,
+                api: access.api,
                 operation: .githubListGrouping
             )
 
@@ -219,10 +308,9 @@ final class TypeSafeDecisionService {
     ) async throws -> [Int64: [AITagSuggestion]] {
         guard !repos.isEmpty else { return [:] }
 
-        guard let apiKey = resolvedAPIKey() else {
+        guard let access = resolvedAccess() else {
             throw TypeSafeClientError.missingAPIKey
         }
-        let model = resolvedModelID
         let maximumTagCount = settings.clampedAITagSuggestionCounts.maximum
 
         // 全局共享词表:多 repo 批次的 hints 是同一份库词表,按 canonical key 去重
@@ -274,9 +362,10 @@ final class TypeSafeDecisionService {
 
             let response = try await client.evaluate(
                 state: state,
-                model: model,
+                model: access.modelID,
                 questions: questions,
-                apiKey: apiKey,
+                apiKey: access.apiKey,
+                api: access.api,
                 operation: .tagReuse
             )
 

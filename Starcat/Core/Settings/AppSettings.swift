@@ -1251,15 +1251,15 @@ final class AppSettings {
     /// Jev 决策引擎总开关（默认 false）。
     ///
     /// 这是所有 Jev 路由的第一道门：关闭时两个路由器逐字节透传既有 LLM 路径。
-    /// 子开关、Key 缺失时同样回退 LLM，不产生半开状态。
+    /// 子开关、原生与 OpenRouter 凭据均不可用时同样回退 LLM，不产生半开状态。
     var typesafeDecisionEnabled: Bool {
         didSet { persistBool(key: Keys.typesafeDecisionEnabled, value: typesafeDecisionEnabled) }
     }
 
-    /// Jev 接管「手动 AI 分组整理」的建议生成（默认 false）。
+    /// Jev 接管仓库分组建议生成（默认 false）。
     ///
-    /// 仅影响 session.mode == .manual 的调用；后台自动整理与 auto-apply
-    /// 永远走既有 LLM 路径（见 `TypeSafeGitHubListSuggestionRouter`）。
+    /// 手动整理与后台自动分组共用同一路由；候选校验、置信度阈值和自动写入边界
+    /// 仍由 `GitHubStarListAIGroupingSession` 负责。
     var typesafeGroupingSuggestionsEnabled: Bool {
         didSet { persistBool(key: Keys.typesafeGroupingSuggestionsEnabled, value: typesafeGroupingSuggestionsEnabled) }
     }
@@ -1270,6 +1270,15 @@ final class AppSettings {
     /// `TypeSafeTagSuggestionRouter`；关闭或缺少 Key 时回退原 LLM 路径。
     var typesafeTagSuggestionsEnabled: Bool {
         didSet { persistBool(key: Keys.typesafeTagSuggestionsEnabled, value: typesafeTagSuggestionsEnabled) }
+    }
+
+    /// 原生 TypeSafe Key 最近一次显式连接测试是否失败（默认 false）。
+    ///
+    /// 这里只记录设置页的明确测试结果，不把普通业务请求错误当作永久失效：失败时保留
+    /// Key，但 Jev 路由跳过原生凭据，优先尝试已验证的 OpenRouter fallback；再次测试
+    /// 原生连接成功后清除该标记。
+    var typesafeNativeKeyTestFailed: Bool {
+        didSet { persistBool(key: Keys.typesafeNativeKeyTestFailed, value: typesafeNativeKeyTestFailed) }
     }
 
     /// 固定版本模型 ID（默认 jev-1.13.0）。
@@ -2106,6 +2115,7 @@ final class AppSettings {
         self.typesafeDecisionEnabled = defaults.object(forKey: Keys.typesafeDecisionEnabled) as? Bool ?? false
         self.typesafeGroupingSuggestionsEnabled = defaults.object(forKey: Keys.typesafeGroupingSuggestionsEnabled) as? Bool ?? false
         self.typesafeTagSuggestionsEnabled = defaults.object(forKey: Keys.typesafeTagSuggestionsEnabled) as? Bool ?? false
+        self.typesafeNativeKeyTestFailed = defaults.object(forKey: Keys.typesafeNativeKeyTestFailed) as? Bool ?? false
         self.typesafeModelID = defaults.string(forKey: Keys.typesafeModelID) ?? TypeSafeDecisionService.defaultModelID
         self.externalSearchAllowPrivateRepos = defaults.object(forKey: Keys.externalSearchAllowPrivateRepos) as? Bool ?? false
         let externalDefaultProviderRaw = defaults.string(forKey: Keys.externalSearchDefaultProvider)
@@ -2418,6 +2428,7 @@ final class AppSettings {
         typesafeDecisionEnabled = false
         typesafeGroupingSuggestionsEnabled = false
         typesafeTagSuggestionsEnabled = false
+        typesafeNativeKeyTestFailed = false
         typesafeModelID = TypeSafeDecisionService.defaultModelID
         externalSearchAllowPrivateRepos = false
         externalSearchDefaultProvider = .anySearch
@@ -3009,6 +3020,7 @@ final class AppSettings {
         static let typesafeDecisionEnabled = "settings.labs.typesafe.enabled.v1"
         static let typesafeGroupingSuggestionsEnabled = "settings.labs.typesafe.grouping.v1"
         static let typesafeTagSuggestionsEnabled = "settings.labs.typesafe.tags.v1"
+        static let typesafeNativeKeyTestFailed = "settings.labs.typesafe.nativeKeyTestFailed.v1"
         static let typesafeModelID = "settings.labs.typesafe.model.v1"
         static let externalSearchAllowPrivateRepos = "settings.externalSearch.context.allowPrivate.v1"
         static let externalSearchDefaultProvider = "settings.externalSearch.defaultProvider.v1"

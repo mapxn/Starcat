@@ -375,6 +375,312 @@
         }
       }
     },
+    "settings.labs.typesafe.enable.unified.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Routes repository grouping and tag suggestions through TypeSafe's Jev model — fast, calibrated typed decisions instead of LLM text generation. Falls back to your configured AI provider when disabled or unconfigured."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将仓库分组与标签建议切换到 TypeSafe Jev 模型：使用快速、带校准概率的类型化决策，而非 LLM 文本生成。关闭或未配置时自动回退到已配置的 AI Provider。"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.grouping.unified" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use Jev for repository grouping"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仓库分组使用 Jev"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.grouping.unified.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to both manually started grouping and background auto-grouping. Jev supplies calibrated probabilities; Starcat validates candidates and applies your configured confidence threshold before any automatic write."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时用于手动发起的仓库分组与后台自动分组。Jev 提供校准概率；任何自动写入前，Starcat 仍会校验候选分组并应用你设置的置信度阈值。"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.tags.unified" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use Jev for tag suggestions"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签建议使用 Jev"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.tags.unified.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to single-repository suggestions, tag-only batches, mixed summary-and-tag tasks, and Auto Tidy. Jev first reuses matching existing tags; when too few qualify and new tags are allowed, your AI provider generates at most one new tag."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于单仓标签建议、纯标签批量、摘要与标签混合任务以及自动整理。Jev 会优先复用匹配的现有标签；达到阈值的标签不足且允许新增时，再由 AI Provider 生成最多一个新标签。"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.scope.unified.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scope: Jev only supplies decisions and probabilities; Starcat keeps candidate validation, confidence thresholds, and write rules. Manual suggestions require confirmation, while enabled automatic actions can apply results that meet your threshold. Probabilities appear as \"Jev P=…\" in the reason field."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "边界：Jev 只提供决策与概率；候选校验、置信度阈值和写入规则仍由 Starcat 控制。手动建议需要确认；启用自动操作时，达到阈值的结果可自动应用。概率会在理由栏显示为 \"Jev P=…\"。"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.apiKey.optional" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TypeSafe API Key (optional)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TypeSafe API Key（可选）"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.noAvailableRoute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No usable Jev credential — routing is falling back to your configured AI provider."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可用的 Jev 凭据，当前路由已回退到你配置的 AI Provider。"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.openRouter.readyFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenRouter fallback ready · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenRouter fallback 已就绪 · %@"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.openRouter.activeMissingKeyFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Using OpenRouter · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前使用 OpenRouter · %@"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.openRouter.activeFailedFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TypeSafe test failed; switched to OpenRouter · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TypeSafe 测试失败，已切换到 OpenRouter · %@"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.openRouter.available.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When the TypeSafe API key is missing or its latest connection test failed, Starcat reuses this verified profile and calls typesafe/jev-1.13 through the OpenRouter Decisions API. The Chat model typesafe/jev-router is not used."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未配置 TypeSafe API Key 或其最近一次连接测试失败时，Starcat 会复用这份已验证的配置，通过 OpenRouter Decisions API 调用 typesafe/jev-1.13；不会使用 Chat 模型 typesafe/jev-router。"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.openRouter.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenRouter fallback is not ready"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenRouter fallback 未就绪"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.openRouter.unavailable.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable and successfully test an OpenRouter provider in AI Services to use it when the TypeSafe key is missing or its test fails."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“AI 服务”中启用并成功测试 OpenRouter 后，TypeSafe Key 缺失或测试失败时即可由它接管 Jev 决策。"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.model.openRouterFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenRouter Decisions API · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenRouter Decisions API · %@"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.model.openRouterDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fixed Decisions API model. It is separate from the Chat model list and may not appear there."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定的 Decisions API 模型，与 Chat 模型列表相互独立，因此可能不会出现在该列表中。"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.test.openRouterSuccessFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected via OpenRouter · %1$@ · %2$@ ms · P(demo) = %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已通过 OpenRouter 连接 · %1$@ · %2$@ ms · P(demo) = %3$@"
+          }
+        }
+      }
+    },
+    "settings.labs.typesafe.test.bothFailedFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TypeSafe failed: %1$@ OpenRouter fallback also failed: %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TypeSafe 连接失败：%1$@ OpenRouter fallback 也失败：%2$@"
+          }
+        }
+      }
+    },
     " · %@" : {
       "localizations" : {
         "en" : {
