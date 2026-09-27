@@ -28,7 +28,11 @@ final class BatchAIWorkspaceWindowController: NSWindowController, NSWindowDelega
         initialMode: BatchAIWorkspaceInitialMode,
         options: Binding<BatchAIQueueOptions>,
         hasUsableExternalSearchProvider: Bool,
-        onStart: @escaping (BatchAIRepositoryScope) async -> Bool,
+        onStart: @escaping (BatchAIWorkspacePreflightContext) async -> BatchAIWorkspaceStartOutcome,
+        onConfirmTaxonomy: @escaping (
+            TagTaxonomyBootstrapSession,
+            [TagTaxonomyCandidate]
+        ) async -> String?,
         onDismiss: @escaping () -> Void
     ) {
         if let activeController {
@@ -50,6 +54,7 @@ final class BatchAIWorkspaceWindowController: NSWindowController, NSWindowDelega
             canPrepareCodeContext: dependencies.repoAIInsightService.canPrepareCodeContext,
             hasUsableExternalSearchProvider: hasUsableExternalSearchProvider,
             onStart: onStart,
+            onConfirmTaxonomy: onConfirmTaxonomy,
             onClose: { closeAction?() }
         )
         .appHostEnvironment(dependencies)

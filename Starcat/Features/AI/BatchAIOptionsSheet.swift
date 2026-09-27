@@ -12,7 +12,7 @@
 //
 //  关键约束：
 //  - 生成标签固定开启；autoApply=false 时，建议在进度窗口逐仓展开并人工应用。
-//  - 启动按钮在 repo 数为 0 或 AI 配置不可用时禁用，避免误触发。
+//  - 常规任务在 AI 配置不可用时禁用；空标签库会切到纯本地体系引导，不要求 AI Key。
 //
 //  UI 设计（2026-06-06 17:51 dong4j 反馈"系统 toggle 太丑"重做）：
 //  - 抛弃 `Toggle(...).toggleStyle(.switch)`：macOS 26 的系统 switch 颗粒粗、
@@ -33,6 +33,7 @@ struct BatchAIOptionsSheet: View {
     @Binding var options: BatchAIQueueOptions
     let canPrepareCodeContext: Bool
     let hasUsableExternalSearchProvider: Bool
+    let requiresTaxonomyBootstrap: Bool
 
     /// 平均每 repo 5-10s（依据 RepoAIInsightService 实测），取中位 8s 给用户一个"约 N 分钟"参考。
     /// 实际进度估算由 BatchAIQueueService.estimatedTimeRemaining 接管。
@@ -94,9 +95,13 @@ struct BatchAIOptionsSheet: View {
                 tint: .green
             )
             summaryCard(
-                title: String(format: String.l10n("batchAI.options.estimateFormat"), estimatedMinutes),
-                value: "\(estimatedMinutes)",
-                icon: "clock",
+                title: requiresTaxonomyBootstrap
+                    ? String.l10n("batchAI.taxonomy.metric.mode")
+                    : String(format: String.l10n("batchAI.options.estimateFormat"), estimatedMinutes),
+                value: requiresTaxonomyBootstrap
+                    ? String.l10n("search.footer.source.local")
+                    : "\(estimatedMinutes)",
+                icon: requiresTaxonomyBootstrap ? "desktopcomputer" : "clock",
                 tint: .orange
             )
         }
@@ -157,7 +162,7 @@ struct BatchAIOptionsSheet: View {
         .frame(width: 640, height: 424, alignment: .top)
         .background(panelBackground)
         .overlay(panelBorder)
-        .onAppear(perform: ensureTagsActionSelected)
+        .onAppear(perform: prepareForPresentation)
     }
 
     private var sessionPanel: some View {
@@ -177,13 +182,17 @@ struct BatchAIOptionsSheet: View {
                 icon: "checklist"
             )
             sessionFact(
-                title: String.l10n("batchAI.options.estimatedTime"),
-                value: String(
-                    format: String.l10n("batchAI.options.estimatedMinutesFormat"),
-                    locale: locale,
-                    estimatedMinutes
-                ),
-                icon: "clock"
+                title: requiresTaxonomyBootstrap
+                    ? String.l10n("batchAI.taxonomy.metric.mode")
+                    : String.l10n("batchAI.options.estimatedTime"),
+                value: requiresTaxonomyBootstrap
+                    ? String.l10n("search.footer.source.local")
+                    : String(
+                        format: String.l10n("batchAI.options.estimatedMinutesFormat"),
+                        locale: locale,
+                        estimatedMinutes
+                    ),
+                icon: requiresTaxonomyBootstrap ? "desktopcomputer" : "clock"
             )
 
             Divider()
@@ -193,12 +202,14 @@ struct BatchAIOptionsSheet: View {
                 title: "batchAI.options.autoApply",
                 isOn: $options.autoApplyTags
             )
+            .disabled(requiresTaxonomyBootstrap)
             // “允许新增”同时控制 Jev 不足时的 LLM 兜底，与是否自动落库正交：
             // 自动应用关闭时，新标签仍只进入当前窗口等待人工确认。
             CompactSettingsToggleRow(
                 title: "batchAI.options.autoCreateMissingTags",
                 isOn: $options.autoCreateMissingTags
             )
+            .disabled(requiresTaxonomyBootstrap)
 
             // 阈值始终可见，关闭自动应用时只禁用 Slider，避免开关导致卡片内容跳动。
             thresholdSlider
@@ -210,6 +221,10 @@ struct BatchAIOptionsSheet: View {
                         locale: locale,
                         skippedTaggedCount
                     ))
+                }
+
+                if requiresTaxonomyBootstrap {
+                    sessionNote(String.l10n("batchAI.taxonomy.summaryAfterSetup"))
                 }
 
                 if options.actions.contains(.summary) {
@@ -310,6 +325,7 @@ struct BatchAIOptionsSheet: View {
                 title: "batchAI.options.action.summary",
                 subtitle: String.l10n("batchAI.options.action.summary.desc"),
                 isSelected: options.actions.contains(.summary),
+                isDisabled: requiresTaxonomyBootstrap,
                 onToggle: { toggleAction(.summary) }
             )
 
@@ -321,7 +337,9 @@ struct BatchAIOptionsSheet: View {
                     subtitle: String.l10n("ai.assistant.summary.options.codeContext.subtitle"),
                     isSelected: options.actions.contains(.summary)
                         && options.codeContextEnabledOverride == true,
-                    isDisabled: !options.actions.contains(.summary) || !canPrepareCodeContext,
+                    isDisabled: requiresTaxonomyBootstrap
+                        || !options.actions.contains(.summary)
+                        || !canPrepareCodeContext,
                     isNested: true,
                     onToggle: {
                         options.codeContextEnabledOverride = !(options.codeContextEnabledOverride ?? false)
@@ -337,7 +355,9 @@ struct BatchAIOptionsSheet: View {
                     ),
                     isSelected: options.actions.contains(.summary)
                         && options.externalContextEnabledOverride == true,
-                    isDisabled: !options.actions.contains(.summary) || !hasUsableExternalSearchProvider,
+                    isDisabled: requiresTaxonomyBootstrap
+                        || !options.actions.contains(.summary)
+                        || !hasUsableExternalSearchProvider,
                     isNested: true,
                     onToggle: {
                         options.externalContextEnabledOverride = !(options.externalContextEnabledOverride ?? false)
@@ -367,7 +387,7 @@ struct BatchAIOptionsSheet: View {
             Slider(value: $options.confidenceThreshold, in: 0.5...1.0, step: 0.05)
                 .controlSize(.mini)
                 .tint(.accentColor)
-                .disabled(!options.autoApplyTags)
+                .disabled(requiresTaxonomyBootstrap || !options.autoApplyTags)
 
             // 阈值仅控制自动应用；低于阈值的有效建议必须明确告知用户仍需人工确认。
             Text(String(
@@ -419,6 +439,18 @@ struct BatchAIOptionsSheet: View {
         var actions = options.actions
         actions.insert(.tags)
         options.actions = actions
+    }
+
+    /// 空词表引导只建立本地标签体系；摘要与自动应用留到体系建立后的常规任务。
+    /// 每次进入预检都清理上一轮残留选项，避免界面显示禁用但参数仍为 true。
+    private func prepareForPresentation() {
+        ensureTagsActionSelected()
+        guard requiresTaxonomyBootstrap else { return }
+        options.actions.remove(.summary)
+        options.autoApplyTags = false
+        options.autoCreateMissingTags = false
+        options.codeContextEnabledOverride = false
+        options.externalContextEnabledOverride = false
     }
 
     private func percentString(_ v: Double) -> String {

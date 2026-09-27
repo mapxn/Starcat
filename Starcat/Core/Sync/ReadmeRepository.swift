@@ -143,6 +143,20 @@ struct ReadmeRepository {
         }
     }
 
+    /// 一次读取当前用户库中全部已缓存 Markdown，供首次标签体系做全局本地分析。
+    ///
+    /// 不按仓库逐条调用 `findContent`：新用户可能一次导入上千个 Star，N+1 查询会把
+    /// 本来纯本地的引导流程拖成大量串行 SQLite 往返。调用方仍需按当前 Star 语料过滤。
+    func fetchAllContents() async throws -> [Int64: String] {
+        try await database.writer.read { db in
+            let rows = try ReadmeContent.fetchAll(db)
+            return Dictionary(uniqueKeysWithValues: rows.compactMap { row in
+                guard let content = row.content, !content.isEmpty else { return nil }
+                return (row.repoId, content)
+            })
+        }
+    }
+
     /// upsert raw Markdown 到 `readme_contents` 表。
     ///
     /// 调用方:`ReadmeAPI.refreshMarkdownIfNeeded(...)` 按需懒补全时使用。

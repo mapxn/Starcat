@@ -16,11 +16,20 @@ struct BatchAIWorkspacePreflightContext {
     let scope: BatchAIRepositoryScope
     let pendingCount: Int
     let skippedTaggedCount: Int
+    /// 标签库为空时，启动按钮进入纯本地词表引导，不依赖 AI Provider 配置。
+    let requiresTaxonomyBootstrap: Bool
 }
 
 enum BatchAIWorkspaceInitialMode {
     case preflight(BatchAIWorkspacePreflightContext)
+    case taxonomy(TagTaxonomyBootstrapReviewModel)
     case review
+}
+
+enum BatchAIWorkspaceStartOutcome {
+    case reviewStarted
+    case taxonomy(TagTaxonomyBootstrapSession)
+    case failed(String?)
 }
 
 struct BatchAIWorkspaceView: View {
@@ -29,13 +38,16 @@ struct BatchAIWorkspaceView: View {
 
     let canPrepareCodeContext: Bool
     let hasUsableExternalSearchProvider: Bool
-    let onStart: (BatchAIRepositoryScope) async -> Bool
+    let onStart: (BatchAIWorkspacePreflightContext) async -> BatchAIWorkspaceStartOutcome
+    let onConfirmTaxonomy: (TagTaxonomyBootstrapSession, [TagTaxonomyCandidate]) async -> String?
     let onClose: () -> Void
 
     @State private var mode: BatchAIWorkspaceInitialMode
     @State private var isStarting = false
+    @State private var operationError: String?
     @State private var showDiscardConfirmation = false
     @State private var reviewFilter: BatchAIResultFilter = .actionable
+    private let originatingPreflightContext: BatchAIWorkspacePreflightContext?
     @Environment(\.starcatInterfaceScale) private var interfaceScale
     @Environment(\.starcatReduceMotion) private var reduceMotion
     /// 预检要读 AI 任务配置；挂上 dependencies 后，设置页改完 Provider / Key 再回工作区会刷新按钮态。
@@ -47,7 +59,11 @@ struct BatchAIWorkspaceView: View {
         options: Binding<BatchAIQueueOptions>,
         canPrepareCodeContext: Bool,
         hasUsableExternalSearchProvider: Bool,
-        onStart: @escaping (BatchAIRepositoryScope) async -> Bool,
+        onStart: @escaping (BatchAIWorkspacePreflightContext) async -> BatchAIWorkspaceStartOutcome,
+        onConfirmTaxonomy: @escaping (
+            TagTaxonomyBootstrapSession,
+            [TagTaxonomyCandidate]
+        ) async -> String?,
         onClose: @escaping () -> Void
     ) {
         self.service = service
@@ -56,7 +72,13 @@ struct BatchAIWorkspaceView: View {
         self.canPrepareCodeContext = canPrepareCodeContext
         self.hasUsableExternalSearchProvider = hasUsableExternalSearchProvider
         self.onStart = onStart
+        self.onConfirmTaxonomy = onConfirmTaxonomy
         self.onClose = onClose
+        if case .preflight(let context) = initialMode {
+            self.originatingPreflightContext = context
+        } else {
+            self.originatingPreflightContext = nil
+        }
     }
 
     var body: some View {
@@ -91,7 +113,7 @@ struct BatchAIWorkspaceView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("batchAI.organizeTags.title")
                     .font(interfaceScale.font(.workspaceTitle))
-                Text("batchAI.organizeTags.subtitle.compact")
+                Text(headerSubtitleKey)
                     .font(interfaceScale.font(.caption))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -132,8 +154,11 @@ struct BatchAIWorkspaceView: View {
                 skippedTaggedCount: context.skippedTaggedCount,
                 options: $options,
                 canPrepareCodeContext: canPrepareCodeContext,
-                hasUsableExternalSearchProvider: hasUsableExternalSearchProvider
+                hasUsableExternalSearchProvider: hasUsableExternalSearchProvider,
+                requiresTaxonomyBootstrap: context.requiresTaxonomyBootstrap
             )
+        case .taxonomy(let model):
+            TagTaxonomyBootstrapView(model: model)
         case .review:
             BatchAIQueuePanel(service: service) { reviewFilter = $0 }
         }
@@ -144,10 +169,11 @@ struct BatchAIWorkspaceView: View {
         Group {
             switch mode {
             case .preflight(let context):
+                let issue = configurationIssue(for: context)
                 HStack(spacing: 10) {
-                    if let configurationIssue {
+                    if let operationError {
                         Label {
-                            Text(verbatim: configurationIssue)
+                            Text(verbatim: operationError)
                                 .lineLimit(2)
                         } icon: {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -155,6 +181,21 @@ struct BatchAIWorkspaceView: View {
                         .font(interfaceScale.font(.caption))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if let issue {
+                        Label {
+                            Text(verbatim: issue)
+                                .lineLimit(2)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                        }
+                        .font(interfaceScale.font(.caption))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if context.requiresTaxonomyBootstrap {
+                        Label("batchAI.taxonomy.preflight.local", systemImage: "checkmark.shield")
+                            .font(interfaceScale.font(.caption))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Label {
                             Text(verbatim: String(
@@ -183,8 +224,27 @@ struct BatchAIWorkspaceView: View {
                         isStarting
                             || !options.isValidForStart
                             || context.pendingCount == 0
-                            || configurationIssue != nil
+                            || issue != nil
                     )
+                }
+                .padding(.horizontal, 20)
+                .frame(height: 58)
+            case .taxonomy(let model):
+                HStack(spacing: 10) {
+                    taxonomyFooterMessage(model)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("batchAI.taxonomy.back") {
+                        guard let originatingPreflightContext else { return }
+                        operationError = nil
+                        mode = .preflight(originatingPreflightContext)
+                    }
+                    .disabled(isStarting || originatingPreflightContext == nil)
+                    Button("batchAI.taxonomy.confirm") {
+                        confirmTaxonomy(model)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(isStarting || !model.hasValidSelection)
                 }
                 .padding(.horizontal, 20)
                 .frame(height: 58)
@@ -227,12 +287,36 @@ struct BatchAIWorkspaceView: View {
         }
     }
 
-    private var configurationIssue: String? {
+    private func configurationIssue(for context: BatchAIWorkspacePreflightContext) -> String? {
+        // 空标签库使用本地引导，不应被尚未配置的 LLM / Jev Key 阻塞。
+        guard !context.requiresTaxonomyBootstrap else { return nil }
         // 显式读取任务配置与服务商列表，建立对 AppSettings 的观察，避免只改 Key 后底栏仍显示旧预检。
         _ = dependencies.settings.aiTagsTask
         _ = dependencies.settings.aiSummaryTask
         _ = dependencies.settings.aiProviderProfiles
         return service.configurationIssue(for: options)
+    }
+
+    @ViewBuilder
+    private func taxonomyFooterMessage(_ model: TagTaxonomyBootstrapReviewModel) -> some View {
+        if let error = model.operationError ?? operationError {
+            Label {
+                Text(verbatim: error)
+                    .lineLimit(2)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            .font(interfaceScale.font(.caption))
+            .foregroundStyle(.secondary)
+        } else if !model.hasValidSelection {
+            Label("batchAI.taxonomy.validation", systemImage: "exclamationmark.triangle.fill")
+                .font(interfaceScale.font(.caption))
+                .foregroundStyle(.secondary)
+        } else {
+            Label("batchAI.taxonomy.footer", systemImage: "lock.shield")
+                .font(interfaceScale.font(.caption))
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - 审核底栏按 Tab 派生
@@ -292,6 +376,11 @@ struct BatchAIWorkspaceView: View {
 
     private var isReviewMode: Bool {
         if case .review = mode { true } else { false }
+    }
+
+    private var headerSubtitleKey: LocalizedStringKey {
+        if case .taxonomy = mode { return "batchAI.taxonomy.subtitle" }
+        return "batchAI.organizeTags.subtitle.compact"
     }
 
     private var statusPill: some View {
@@ -364,10 +453,31 @@ struct BatchAIWorkspaceView: View {
     private func start(_ context: BatchAIWorkspacePreflightContext) {
         guard !isStarting else { return }
         isStarting = true
+        operationError = nil
         Task {
-            let didStart = await onStart(context.scope)
+            let outcome = await onStart(context)
             isStarting = false
-            if didStart {
+            switch outcome {
+            case .reviewStarted:
+                mode = .review
+            case .taxonomy(let session):
+                mode = .taxonomy(TagTaxonomyBootstrapReviewModel(session: session))
+            case .failed(let message):
+                operationError = message
+            }
+        }
+    }
+
+    private func confirmTaxonomy(_ model: TagTaxonomyBootstrapReviewModel) {
+        guard !isStarting, model.hasValidSelection else { return }
+        isStarting = true
+        model.operationError = nil
+        Task {
+            let error = await onConfirmTaxonomy(model.session, model.selectedCandidates)
+            isStarting = false
+            if let error {
+                model.operationError = error
+            } else {
                 mode = .review
             }
         }

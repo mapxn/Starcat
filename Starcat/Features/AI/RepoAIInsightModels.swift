@@ -124,11 +124,13 @@ struct RepoAIInsightContextMeta: Codable, Equatable, Sendable {
 
 /// 标签建议实际由哪类引擎产生。
 ///
-/// Jev 与 LLM 可能在同一次任务中各自产出一部分建议，因此来源必须随单条建议持久化，
-/// 不能只记录在任务级状态上。
+/// Jev、LLM 与首次体系的本地分析都可能进入同一套审核 UI，因此来源必须随单条建议
+/// 持久化，不能只记录在任务级状态上。
 enum AITagSuggestionEngine: String, Codable, Equatable, Sendable {
     case jev
     case llm
+    /// 首次标签体系引导的确定性本地分析；不经过任何远端 AI Provider。
+    case local
 }
 
 struct AITagSuggestion: Codable, Identifiable, Equatable, Sendable {

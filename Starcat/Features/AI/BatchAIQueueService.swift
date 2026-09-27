@@ -374,6 +374,114 @@ final class BatchAIQueueService {
         return true
     }
 
+    /// 以纯本地候选直接建立一轮人工审核，不启动 Provider Worker。
+    ///
+    /// 首次标签体系已经在独立工作台完成全局候选分析；这里仅把确定性归类结果投影为
+    /// `BatchAIJob`，从而复用既有逐仓勾选、草稿恢复和最终 repo_tags 写入能力。标签关系
+    /// 仍必须由用户在审核页确认，不能因为本地分析不消耗 token 就绕过保守写入边界。
+    @discardableResult
+    func startLocalTagReview(
+        repos: [Repo],
+        suggestionsByRepoID: [Int64: [AITagSuggestion]],
+        options requestedOptions: BatchAIQueueOptions
+    ) async -> Bool {
+        guard !isRunning, runLoopTask == nil else {
+            AppLog.ai.warning("[batch-ai] local taxonomy review ignored: queue is running")
+            return false
+        }
+        guard !hasUnresolvedManualWork else {
+            AppLog.ai.warning("[batch-ai] local taxonomy review ignored: unresolved manual session exists")
+            return false
+        }
+        guard !repos.isEmpty, suggestionsByRepoID.values.contains(where: { !$0.isEmpty }) else {
+            AppLog.ai.warning("[batch-ai] local taxonomy review ignored: no local suggestions")
+            return false
+        }
+        do {
+            // 本轮没有远端生成调用，Pro 门控必须按 local-only 语义判断，不能要求 AI Key。
+            try entitlementGate?.requirePro(.batchAI, usesLocalOnly: true)
+        } catch {
+            AppLog.ai.warning("[batch-ai] local taxonomy review blocked by entitlement: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+
+        var localOptions = requestedOptions
+        localOptions.actions = [.tags]
+        localOptions.autoApplyTags = false
+        localOptions.autoCreateMissingTags = false
+        localOptions.standardActionRepoIDs = nil
+
+        let existingTags: [Tag]
+        do {
+            existingTags = try await tagRepository.fetchAll()
+        } catch {
+            AppLog.database.error("[batch-ai] load local taxonomy tags failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        let existingKeys = Set(existingTags.compactMap { tag -> String? in
+            let key = AITagSuggestionPolicy.canonicalKey(tag.name)
+            return key.isEmpty ? nil : key
+        })
+        let now = Date.now
+
+        self.options = localOptions
+        self.invocationMode = .manual
+        self.repoCache = Dictionary(uniqueKeysWithValues: repos.map { ($0.id, $0) })
+        self.jobs = repos.map { repo in
+            var job = BatchAIJob(
+                repoId: repo.id,
+                repoFullName: repo.fullName,
+                repoDescription: repo.description,
+                ownerAvatarURL: repo.ownerAvatar
+            )
+            let suggestions = suggestionsByRepoID[repo.id] ?? []
+            job.suggestedTags = suggestions
+            job.suggestedTagAvailability = suggestions.reduce(into: [:]) { result, suggestion in
+                let key = AITagSuggestionPolicy.canonicalKey(suggestion.name)
+                result[suggestion.id] = existingKeys.contains(key) ? .existing : .missing
+            }
+            job.finishedAt = now
+            if suggestions.isEmpty {
+                // 未命中不是 Provider 失败；保留在“忽略”中，用户仍能看到本地体系的覆盖边界。
+                job.status = .ignored
+                job.tagReviewState = .ignored
+            } else {
+                job.status = .completed
+                job.selectedSuggestedTagIDs = Set(suggestions.map(\.id))
+                job.tagReviewState = .pending
+            }
+            return job
+        }
+        self.selectedRepoIDsForTagApplication = Set(jobs.compactMap { job in
+            job.tagReviewState == .pending ? job.repoId : nil
+        })
+        self.bulkActionRepoIDs = []
+        self.isPaused = false
+        self.isRunning = false
+        self.cancelRequested = false
+        self.accountResetRequested = false
+        self.hasPendingTagsChangedNotification = false
+        self.startedAt = now
+        self.processingJobIDs = []
+        self.sharedTagLibrary = existingTags.map(\.name)
+        self.initialTagCanonicalKeys = existingKeys
+        self.pendingTagCreationsByCanonicalKey = [:]
+        self.retryNotBeforeByRepoID = [:]
+        self.rateLimitCooldownUntil = nil
+        self.activeDraftID = UUID()
+        self.isDraftCreated = false
+
+        guard await prepareDraftForRun() else {
+            deleteActiveDraft()
+            reset()
+            return false
+        }
+        AppLog.ai.notice(
+            "[batch-ai] local taxonomy review ready: total=\(repos.count, privacy: .public), pending=\(self.pendingTagReviewCount, privacy: .public)"
+        )
+        return true
+    }
+
     /// 整理弹窗的只读预检结果。UI 与 `start()` 复用同一校验入口，避免按钮显示可用，
     /// 点击后却创建整批失败任务。返回值已经本地化，可直接作为错误说明展示。
     func configurationIssue(
@@ -1000,6 +1108,7 @@ final class BatchAIQueueService {
     /// 不等待其它 Worker，因此快请求的完成状态会立即出现在列表和顶部进度中。
     private func runLoop() async {
         guard let options else { return }
+        var effectiveOptions = options
 
         if options.actions.contains(.tags) {
             if initialTagCanonicalKeys == nil {
@@ -1020,15 +1129,32 @@ final class BatchAIQueueService {
                     tagRepository: tagRepository
                 )
             }
+            if silent, sharedTagLibrary?.isEmpty == true {
+                // 后台自动整理没有用户确认词表的界面；空标签库时逐仓让 LLM 自由造词会稳定
+                // 退化成“一仓一标签”。因此只跳过标签子任务，摘要仍可继续，标签体系交给
+                // 用户下次打开手动整理时通过本地全局引导建立。
+                effectiveOptions.actions.remove(.tags)
+                AppLog.ai.notice("[batch-ai] automatic tags skipped: empty canonical tag library")
+            }
         }
 
-        await withTaskGroup(of: Void.self) { group in
-            for workerIndex in 0..<Self.defaultConcurrency {
-                group.addTask { [weak self] in
-                    await self?.runWorker(index: workerIndex, options: options)
-                }
+        if effectiveOptions.actions.isEmpty {
+            let now = Date.now
+            for index in jobs.indices where jobs[index].status == .queued {
+                jobs[index].status = .ignored
+                jobs[index].tagReviewState = .ignored
+                jobs[index].finishedAt = now
             }
-            await group.waitForAll()
+        } else {
+            let workerOptions = effectiveOptions
+            await withTaskGroup(of: Void.self) { group in
+                for workerIndex in 0..<Self.defaultConcurrency {
+                    group.addTask { [weak self] in
+                        await self?.runWorker(index: workerIndex, options: workerOptions)
+                    }
+                }
+                await group.waitForAll()
+            }
         }
 
         // 循环退出：若全部终态则关掉 isRunning；否则保留状态等用户 resume / cancel。

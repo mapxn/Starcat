@@ -391,7 +391,16 @@ struct BatchAIQueueServiceTests {
     func silentAutoApplyKeepsBelowThresholdResultIgnored() async throws {
         let suggestions = [AITagSuggestion(name: "Swift", confidence: 0.70, reason: "主要开发语言")]
         let provider = ImmediateBatchAIInsightProvider(suggestions: suggestions)
-        let service = try makeService(insightProvider: provider)
+        let database = try InMemoryDatabaseManager()
+        let tagRepository = GRDBTagRepository(database: database)
+        let service = makeService(
+            insightProvider: provider,
+            database: database,
+            tagRepository: tagRepository,
+            repoTagRepository: GRDBRepoTagRepository(database: database)
+        )
+        // 自动任务只有在已有可复用标签时才调用分类引擎；否则会按冷启动策略直接跳过标签阶段。
+        try await tagRepository.create(.fixture(id: "swift", name: "Swift"))
         var repo = Repo.makeMinimal(owner: "acme", name: "silent-below-threshold")
         repo.id = 507
         var options = BatchAIQueueOptions()
@@ -768,6 +777,71 @@ struct BatchAIQueueServiceTests {
         #expect(!service.hasPendingTagReview)
         #expect(service.start(repos: [second], options: options))
         await waitUntilStopped(service)
+    }
+
+    @Test("本地标签体系直接进入待确认且不调用 Provider")
+    func localTaxonomyStartsReviewWithoutCallingProvider() async throws {
+        let database = try InMemoryDatabaseManager(userId: 1)
+        let tagRepository = GRDBTagRepository(database: database)
+        let provider = ImmediateBatchAIInsightProvider(suggestions: Self.sampleSuggestions)
+        let service = makeService(
+            insightProvider: provider,
+            database: database,
+            tagRepository: tagRepository,
+            repoTagRepository: GRDBRepoTagRepository(database: database)
+        )
+        let now = ISO8601DateFormatter.shared.string(from: .now)
+        try await tagRepository.create(Tag(
+            id: UUID().uuidString,
+            name: "Swift",
+            color: nil,
+            icon: nil,
+            sortOrder: 0,
+            isPreset: false,
+            parentId: nil,
+            createdAt: now,
+            updatedAt: now
+        ))
+        let repo = Self.makeTestRepos(ids: [901])[0]
+        let localSuggestion = AITagSuggestion(
+            name: "Swift",
+            confidence: 0.93,
+            reason: "local evidence",
+            engine: .local
+        )
+
+        #expect(await service.startLocalTagReview(
+            repos: [repo],
+            suggestionsByRepoID: [repo.id: [localSuggestion]],
+            options: BatchAIQueueOptions()
+        ))
+
+        #expect(provider.generationCount == 0)
+        #expect(!service.isRunning)
+        #expect(service.pendingTagReviewCount == 1)
+        #expect(service.jobs.first?.status == .completed)
+        #expect(service.jobs.first?.tagReviewState == .pending)
+        #expect(service.jobs.first?.suggestedTags.first?.engine == .local)
+        #expect(service.jobs.first?.suggestedTagAvailability[localSuggestion.id] == .existing)
+    }
+
+    @Test("自动整理在空标签库跳过标签生成")
+    func automaticRunSkipsTagGenerationWhenLibraryIsEmpty() async throws {
+        let provider = ImmediateBatchAIInsightProvider(suggestions: Self.sampleSuggestions)
+        let service = try makeService(insightProvider: provider)
+        var options = BatchAIQueueOptions()
+        options.actions = [.tags]
+
+        #expect(service.start(
+            repos: Self.makeTestRepos(ids: [902, 903]),
+            options: options,
+            invocationMode: .automatic
+        ))
+        await waitUntilStopped(service)
+
+        #expect(provider.generationCount == 0)
+        #expect(service.jobs.allSatisfy { $0.status == .ignored })
+        #expect(service.failedCount == 0)
     }
 
     private static let sampleSuggestions = [

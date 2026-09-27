@@ -2197,41 +2197,176 @@ struct HomeView: View {
     ///
     /// 错误处理：fetchUntagged 失败仅记日志，不弹错——这是用户主动触发的场景，
     /// 失败时按钮仍可继续点（dependencies 状态未变，第二次点击会重试）。
-    private func startBatchAIIntegration(scope: BatchAIRepositoryScope) async -> Bool {
+    private func startBatchAIIntegration(
+        context: BatchAIWorkspacePreflightContext
+    ) async -> BatchAIWorkspaceStartOutcome {
         do {
-            try dependencies.entitlementGate.requirePro(.batchAI, usesLocalOnly: dependencies.settings.isGenerationTasksResolvedToLocalAI)
+            try dependencies.entitlementGate.requirePro(
+                .batchAI,
+                usesLocalOnly: context.requiresTaxonomyBootstrap
+                    || dependencies.settings.isGenerationTasksResolvedToLocalAI
+            )
         } catch {
             paywallContext = ProPaywallContext(feature: .batchAI, message: error.localizedDescription)
-            return false
+            return .failed(error.localizedDescription)
         }
         batchAIOptions.actions.insert(.tags)
-        guard dependencies.batchAIQueueService.configurationIssue(for: batchAIOptions) == nil else {
+        guard context.requiresTaxonomyBootstrap
+            || dependencies.batchAIQueueService.configurationIssue(for: batchAIOptions) == nil
+        else {
             // Sheet 会用同一预检结果展示具体原因并保持打开；这里防止设置在点击瞬间变化后
             // 仍去拉仓库或抢占正在运行的自动整理。
-            return false
+            return .failed(nil)
         }
         let repositories: [Repo]
         do {
-            repositories = try await scope.resolveRepositories {
+            repositories = try await context.scope.resolveRepositories {
                 try await dependencies.repoRepository.fetchUntagged()
             }
         } catch {
             AppLog.ai.error("[batch-ai] resolve repositories failed: \(error.localizedDescription, privacy: .public)")
-            return false
+            return .failed(String.l10n("batchAI.taxonomy.error.loadRepositories"))
         }
-        guard !repositories.isEmpty else { return false }
-        let wasSelectionScoped = scope.isSelectionScoped
+        guard !repositories.isEmpty else { return .failed(nil) }
+
+        if context.requiresTaxonomyBootstrap {
+            do {
+                async let corpusTask = dependencies.repoRepository.fetchAllStarred()
+                async let readmesTask = dependencies.readmeRepository.fetchAllContents()
+                let (corpus, readmes) = try await (corpusTask, readmesTask)
+                let analyzer = TagTaxonomyBootstrapAnalyzer()
+                let session = await analyzer.analyze(
+                    corpusRepositories: corpus,
+                    targetRepositories: repositories,
+                    cachedReadmesByRepositoryID: readmes
+                )
+                guard !session.candidates.isEmpty else {
+                    return .failed(String.l10n("batchAI.taxonomy.error.noCandidates"))
+                }
+                return .taxonomy(session)
+            } catch {
+                AppLog.ai.error(
+                    "[batch-ai] local taxonomy analysis failed: \(error.localizedDescription, privacy: .public)"
+                )
+                return .failed(String.l10n("batchAI.taxonomy.error.analysis"))
+            }
+        }
+
+        let wasSelectionScoped = context.scope.isSelectionScoped
         // 用户主动整理优先于静默自动轮次。必须等待旧 runLoop 完全退出后再复用
         // BatchAIQueueService，避免两轮同时改写 jobs / options 和标签数据。
         await dependencies.batchAIQueueService.preemptAutomaticRunForManualStart()
         guard dependencies.batchAIQueueService.start(repos: repositories, options: batchAIOptions) else {
-            return false
+            return .failed(nil)
         }
         if wasSelectionScoped {
             dependencies.manageMultiSelectionStore.exit()
         }
         batchAIOptionsPresentation = nil
-        return true
+        return .reviewStarted
+    }
+
+    /// 用户确认首次词表后创建标签实体，并把本地闭集匹配结果交给既有逐仓审核。
+    /// repo_tags 仍不会在这里写入；只有审核页的“应用”出口可以建立仓库关联。
+    private func confirmTagTaxonomyBootstrap(
+        session: TagTaxonomyBootstrapSession,
+        selectedCandidates: [TagTaxonomyCandidate]
+    ) async -> String? {
+        guard !selectedCandidates.isEmpty else {
+            return String.l10n("batchAI.taxonomy.validation")
+        }
+
+        let normalizedCandidates = selectedCandidates.map { candidate -> TagTaxonomyCandidate in
+            var copy = candidate
+            copy.name = AITagSuggestionPolicy.normalizedDisplayName(candidate.name)
+            return copy
+        }
+        let canonicalNames = normalizedCandidates.map { AITagSuggestionPolicy.canonicalKey($0.name) }
+        guard canonicalNames.allSatisfy({ !$0.isEmpty }),
+              Set(canonicalNames).count == canonicalNames.count
+        else {
+            return String.l10n("batchAI.taxonomy.validation")
+        }
+
+        let suggestionLimit = dependencies.settings.clampedAITagSuggestionCounts.maximum
+        let suggestionReason = String.l10n("batchAI.taxonomy.suggestionReason")
+        let preliminarySuggestions = session.suggestions(
+            candidates: normalizedCandidates,
+            maximumPerRepository: suggestionLimit,
+            reason: suggestionReason
+        )
+        // 先验证本轮目标确实有命中，再创建标签实体；否则用户会看到错误，但词表已经被部分写入。
+        guard preliminarySuggestions.values.contains(where: { !$0.isEmpty }) else {
+            return String.l10n("batchAI.taxonomy.error.noTargetMatches")
+        }
+
+        // 用户主动确认优先于后台自动轮次；等待旧 Worker 完全退出后再创建本轮词表和草稿。
+        await dependencies.batchAIQueueService.preemptAutomaticRunForManualStart()
+
+        do {
+            let existingTags = try await dependencies.tagRepository.fetchAll()
+            var resolvedNamesByCanonicalKey: [String: String] = [:]
+            for tag in existingTags {
+                let key = AITagSuggestionPolicy.canonicalKey(tag.name)
+                guard !key.isEmpty, resolvedNamesByCanonicalKey[key] == nil else { continue }
+                resolvedNamesByCanonicalKey[key] = tag.name
+            }
+
+            for candidate in normalizedCandidates {
+                let key = AITagSuggestionPolicy.canonicalKey(candidate.name)
+                guard resolvedNamesByCanonicalKey[key] == nil else { continue }
+                let tag = makeTaxonomyTag(named: candidate.name)
+                try await dependencies.tagRepository.create(tag)
+                resolvedNamesByCanonicalKey[key] = tag.name
+            }
+
+            let resolvedCandidates = normalizedCandidates.map { candidate -> TagTaxonomyCandidate in
+                var copy = candidate
+                let key = AITagSuggestionPolicy.canonicalKey(candidate.name)
+                copy.name = resolvedNamesByCanonicalKey[key] ?? candidate.name
+                return copy
+            }
+            let suggestions = session.suggestions(
+                candidates: resolvedCandidates,
+                maximumPerRepository: suggestionLimit,
+                reason: suggestionReason
+            )
+
+            guard await dependencies.batchAIQueueService.startLocalTagReview(
+                repos: session.targetRepositories,
+                suggestionsByRepoID: suggestions,
+                options: batchAIOptions
+            ) else {
+                return String.l10n("batchAI.taxonomy.error.startReview")
+            }
+
+            if batchAIOptionsPresentation?.usesSelectedRepositories == true {
+                dependencies.manageMultiSelectionStore.exit()
+            }
+            batchAIOptionsPresentation = nil
+            return nil
+        } catch {
+            AppLog.ai.error(
+                "[batch-ai] commit local taxonomy failed: \(error.localizedDescription, privacy: .public)"
+            )
+            return String.l10n("batchAI.taxonomy.error.createTags")
+        }
+    }
+
+    private func makeTaxonomyTag(named name: String) -> Tag {
+        let now = ISO8601DateFormatter.shared.string(from: .now)
+        let visual = TagAutoVisual.pick(for: name)
+        return Tag(
+            id: UUID().uuidString,
+            name: name,
+            color: visual.colorHex,
+            icon: visual.iconName,
+            sortOrder: 0,
+            isPreset: false,
+            parentId: nil,
+            createdAt: now,
+            updatedAt: now
+        )
     }
 
     /// 根据入口固定本次仓库范围，并重置本轮可选操作。
@@ -2241,7 +2376,7 @@ struct HomeView: View {
     private func presentBatchAIOptions(
         scope: BatchAIRepositoryScope,
         skippedTaggedCount: Int = 0
-    ) {
+    ) async {
         batchAIOptions.actions = [.tags]
         batchAIOptions.codeContextEnabledOverride = false
         batchAIOptions.externalContextEnabledOverride = false
@@ -2251,10 +2386,23 @@ struct HomeView: View {
             skippedTaggedCount: skippedTaggedCount
         )
         batchAIOptionsPresentation = presentation
+        let hasReusableCanonicalTag: Bool
+        do {
+            hasReusableCanonicalTag = try await dependencies.tagRepository.fetchAll().contains { tag in
+                !AITagSuggestionPolicy.canonicalKey(tag.name).isEmpty
+            }
+        } catch {
+            // 读取失败时不要误判为空库并进入创建流程；点击启动后会由原预检继续阻止异常路径。
+            hasReusableCanonicalTag = true
+            AppLog.database.error(
+                "[batch-ai] inspect canonical tag library failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
         let context = BatchAIWorkspacePreflightContext(
             scope: presentation.scope,
             pendingCount: presentation.pendingCount(untaggedCount: viewModel.untaggedCount),
-            skippedTaggedCount: presentation.skippedTaggedCount
+            skippedTaggedCount: presentation.skippedTaggedCount,
+            requiresTaxonomyBootstrap: !hasReusableCanonicalTag
         )
         BatchAIWorkspaceWindowController.present(
             dependencies: dependencies,
@@ -2262,6 +2410,7 @@ struct HomeView: View {
             options: $batchAIOptions,
             hasUsableExternalSearchProvider: hasUsableExternalSearchProvider,
             onStart: startBatchAIIntegration,
+            onConfirmTaxonomy: confirmTagTaxonomyBootstrap,
             onDismiss: dismissBatchAIOptions
         )
     }
@@ -2272,7 +2421,7 @@ struct HomeView: View {
         if dependencies.batchAIQueueService.hasUnresolvedManualWork {
             presentBatchAIProgress()
         } else {
-            presentBatchAIOptions(scope: scope)
+            Task { await presentBatchAIOptions(scope: scope) }
         }
     }
 
@@ -2305,7 +2454,7 @@ struct HomeView: View {
             batchAISelectionNotice = String.l10n("batchAI.selection.allTagged")
             return
         }
-        presentBatchAIOptions(
+        await presentBatchAIOptions(
             scope: .selected(eligible),
             skippedTaggedCount: skippedTaggedCount
         )
@@ -2324,6 +2473,7 @@ struct HomeView: View {
             options: $batchAIOptions,
             hasUsableExternalSearchProvider: hasUsableExternalSearchProvider,
             onStart: startBatchAIIntegration,
+            onConfirmTaxonomy: confirmTagTaxonomyBootstrap,
             onDismiss: dismissBatchAIOptions
         )
     }

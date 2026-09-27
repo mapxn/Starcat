@@ -322,6 +322,8 @@ struct BatchAITagReviewRow: View {
             return "batchAI.panel.review.modelOrigin.jev"
         case .some(.llm):
             return "batchAI.panel.review.modelOrigin.llm"
+        case .some(.local):
+            return "search.footer.source.local"
         case .none:
             return "batchAI.panel.review.modelOrigin.unknown"
         }
