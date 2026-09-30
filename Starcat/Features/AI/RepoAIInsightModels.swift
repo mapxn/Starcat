@@ -128,6 +128,7 @@ struct RepoAIInsightContextMeta: Codable, Equatable, Sendable {
 /// 持久化，不能只记录在任务级状态上。
 enum AITagSuggestionEngine: String, Codable, Equatable, Sendable {
     case jev
+    case laya
     case llm
     /// 首次标签体系引导的确定性本地分析；不经过任何远端 AI Provider。
     case local

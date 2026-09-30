@@ -71,6 +71,61 @@ struct LocalAIModelDownloaderTests {
         #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("model.safetensors.huggingface.part").path))
     }
 
+    @Test("保留 checkpoint 子目录并在 manifest 结果中返回完整相对路径")
+    func downloadsNestedCheckpointFile() async throws {
+        URLProtocolStub.reset()
+        defer { URLProtocolStub.reset() }
+        let payload = Data(#"{"model_type":"modernbert"}"#.utf8)
+        URLProtocolStub.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Length": "\(payload.count)"]
+                )!,
+                payload
+            )
+        }
+
+        let downloader = LocalAIModelDownloader(session: makeSession())
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("localai-dl-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let result = try await downloader.downloadFile(
+            remoteURL: URL(string: "https://models.test.invalid/encoder/config.json")!,
+            fileName: "encoder/config.json",
+            sourceKind: .huggingFace,
+            into: directory,
+            expectedTotalBytes: Int64(payload.count),
+            onProgress: nil
+        )
+
+        #expect(result.name == "encoder/config.json")
+        #expect(try Data(contentsOf: directory.appendingPathComponent(result.name)) == payload)
+        #expect(!FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent(
+                "encoder/config.json.huggingface.part"
+            ).path
+        ))
+    }
+
+    @Test("嵌套模型路径不能逃出目标目录")
+    func rejectsNestedPathTraversal() async {
+        let downloader = LocalAIModelDownloader(session: makeSession())
+        await #expect(throws: LocalAIDownloadError.invalidURL("../outside.bin")) {
+            _ = try await downloader.downloadFile(
+                remoteURL: URL(string: "https://models.test.invalid/outside.bin")!,
+                fileName: "../outside.bin",
+                sourceKind: .huggingFace,
+                into: FileManager.default.temporaryDirectory,
+                expectedTotalBytes: nil,
+                onProgress: nil
+            )
+        }
+    }
+
     @Test("进度回调报告真实落盘字节")
     func reportsActualDownloadedBytes() async throws {
         URLProtocolStub.reset()

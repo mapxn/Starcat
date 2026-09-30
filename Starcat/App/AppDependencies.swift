@@ -1107,16 +1107,19 @@ final class AppDependencies {
         let summaryRepo = GRDBAISummaryRepository(database: db)
         self.aiSummaryRepository = summaryRepo
 
-        // Labs POC（2026-09-18）：Jev 决策服务与统一标签路由。
-        // 标签路由直接注入 RepoAIInsightService，因此单仓、纯标签批量、摘要+标签混合任务
-        // 和自动整理都会经过同一套 Jev-first 策略；开关关闭或 Key 缺失仍走原 LLM。
-        let typesafeDecisionService = TypeSafeDecisionService(
-            client: TypeSafeClient(),
+        // Labs 决策引擎：业务服务只依赖注册表，Jev（含 OpenRouter 承载路径）与
+        // Laya（进程内 MLX）是并列实现。用户只选择一个实现，不做跨引擎自动故障切换。
+        let decisionEngineRegistry = DecisionEngineRegistry(engines: [
+            JevDecisionEngine(client: TypeSafeClient(), settings: self.settings),
+            LayaDecisionEngine(),
+        ])
+        let repositoryDecisionService = RepositoryDecisionService(
+            engineRegistry: decisionEngineRegistry,
             settings: self.settings,
             readmeRepository: readmeRepo
         )
-        let typesafeTagSuggestionRouter = TypeSafeTagSuggestionRouter(
-            typesafeProvider: typesafeDecisionService,
+        let decisionTagSuggestionRouter = DecisionTagSuggestionRouter(
+            decisionProvider: repositoryDecisionService,
             settings: self.settings
         )
 
@@ -1142,7 +1145,7 @@ final class AppDependencies {
             settings: self.settings,
             repoAIContextProvider: repoAIContextProvider,
             entitlementGate: self.entitlementGate,
-            tagSuggestionRouter: typesafeTagSuggestionRouter
+            tagSuggestionRouter: decisionTagSuggestionRouter
         )
         self.repoAIInsightService = aiInsight
         self.diskChatHistoryStore = .shared
@@ -1194,11 +1197,11 @@ final class AppDependencies {
         // 注：onTagsChanged 由 HomeView 在 environment 注入后挂接，刷新 Sidebar 计数。
         let aiOrganizationDraftRepository = GRDBAIOrganizationDraftRepository(database: db)
 
-        // 分组保留独立路由：手动与后台自动分组统一 Jev-first，但候选校验、阈值与
-        // GitHub Lists 写入边界仍由 GitHubStarListAIGroupingSession 负责。
-        let typesafeGroupingRouter = TypeSafeGitHubListSuggestionRouter(
+        // 分组保留独立路由：手动与后台自动分组统一使用所选决策引擎，但候选校验、
+        // 阈值与 GitHub Lists 写入边界仍由 GitHubStarListAIGroupingSession 负责。
+        let decisionGroupingRouter = DecisionGitHubListSuggestionRouter(
             llmProvider: aiInsight,
-            typesafeProvider: typesafeDecisionService,
+            decisionProvider: repositoryDecisionService,
             settings: self.settings
         )
 
@@ -1216,7 +1219,7 @@ final class AppDependencies {
         self.githubStarListAIGroupingSession = GitHubStarListAIGroupingSession(
             repoRepository: repo,
             listService: self.githubStarListSyncService,
-            insightService: typesafeGroupingRouter,
+            insightService: decisionGroupingRouter,
             entitlementGate: self.entitlementGate,
             draftRepository: aiOrganizationDraftRepository
         )

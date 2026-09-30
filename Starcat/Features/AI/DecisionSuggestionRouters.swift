@@ -1,52 +1,35 @@
 //
-//  TypeSafeSuggestionRouters.swift
+//  DecisionSuggestionRouters.swift
 //  Starcat
 //
-//  Jev 决策服务的两个装配路由器 —— 实验性功能(Labs)POC。
+//  实验性决策引擎与既有 LLM 路径之间的统一路由。
 //
-//  为什么用路由器而不是直接替换 Provider:
-//  - 现有 LLM 路径必须保留为默认路径：开关关闭或 Key 未配置时原样调用 LLM，
-//    不能让实验功能的配置状态阻断正式标签能力；
-//  - Jev 是实验特性,后续可能整体下线 —— 下线时只需从 AppDependencies 摘掉这两层
-//    路由,业务文件(会话 / 队列 / 服务)零改动。
-//
-//  路由边界(POC 安全边界):
-//  - 分组：手动整理与 AutoTidyScheduler 后台自动分组共用 Jev-first 路由；Jev 只
-//    返回候选概率，封闭集校验、置信度阈值与写入规则仍由现有会话负责；
-//  - 标签：所有标签生成入口统一先让 Jev 对现有词表打分；结果不足且业务策略允许新增时，
-//    才按需调用一次 LLM 生成词表外的新标签，新标签不再回送 Jev 做二次否决；
-//  - 失败语义:Jev 失败不静默回退 LLM(双跑烧两份钱 + 加倍延迟),错误沿既有
-//    失败分类上抛,由会话 / 队列现有的重试与展示语义接管。
+//  选择的引擎在调用前不可用时走原 LLM；一旦引擎开始执行，失败会原样上抛，
+//  不自动改用另一个决策引擎或再次调用 LLM，避免重复费用、延迟和语义漂移。
 //
 
 import Foundation
 
-// MARK: - 分组建议路由
-
-/// `GitHubStarListAIGroupingSession` 的 Provider 路由层。
-///
-/// 手动窗口与 AutoTidyScheduler 共享同一 Provider，因此这里只按 Labs 配置与凭据
-/// 决定是否使用 Jev；调用来源对应的审核、阈值和自动写入边界继续留在会话层。
 @MainActor
-final class TypeSafeGitHubListSuggestionRouter: GitHubStarListSuggestionProviding {
+final class DecisionGitHubListSuggestionRouter: GitHubStarListSuggestionProviding {
     private let llmProvider: any GitHubStarListSuggestionProviding
-    private let typesafeProvider: TypeSafeDecisionService
+    private let decisionProvider: RepositoryDecisionService
     private let settings: AppSettings
 
     init(
         llmProvider: any GitHubStarListSuggestionProviding,
-        typesafeProvider: TypeSafeDecisionService,
+        decisionProvider: RepositoryDecisionService,
         settings: AppSettings
     ) {
         self.llmProvider = llmProvider
-        self.typesafeProvider = typesafeProvider
+        self.decisionProvider = decisionProvider
         self.settings = settings
     }
 
-    private var shouldRouteToTypesafe: Bool {
-        settings.typesafeDecisionEnabled
-            && settings.typesafeGroupingSuggestionsEnabled
-            && typesafeProvider.canResolveAPIKey()
+    private var shouldRouteToDecisionEngine: Bool {
+        settings.decisionEngineEnabled
+            && settings.decisionGroupingSuggestionsEnabled
+            && decisionProvider.isSelectedEngineAvailable
     }
 
     func generateGitHubListSuggestions(
@@ -55,17 +38,17 @@ final class TypeSafeGitHubListSuggestionRouter: GitHubStarListSuggestionProvidin
         existingListIDsByRepo: [Int64: Set<String>],
         existingListNamesByRepo: [Int64: [String]]
     ) async throws -> [Int64: [GitHubStarListAISuggestion]] {
-        if shouldRouteToTypesafe {
+        if shouldRouteToDecisionEngine {
             do {
-                return try await typesafeProvider.generateGitHubListSuggestions(
+                return try await decisionProvider.generateGitHubListSuggestions(
                     for: repos,
                     candidates: candidates,
                     existingListIDsByRepo: existingListIDsByRepo,
                     existingListNamesByRepo: existingListNamesByRepo
                 )
-            } catch let error as TypeSafeClientError {
+            } catch {
                 AppLog.ai.error(
-                    "[typesafePOC] grouping suggestions failed, surfacing error: \(error.localizedDescription, privacy: .public)"
+                    "[decisionEngine] grouping suggestions failed, surfacing error: \(error.localizedDescription, privacy: .public)"
                 )
                 throw error
             }
@@ -79,30 +62,23 @@ final class TypeSafeGitHubListSuggestionRouter: GitHubStarListSuggestionProvidin
     }
 }
 
-// MARK: - 标签建议路由
-
-/// 所有 AI 标签入口共用的 Jev-first 路由。
-///
-/// 路由器不持有 `RepoAIInsightService`，而是由调用方传入本次 LLM fallback 闭包：
-/// 这样单仓面板可以复用已经准备好的 README / 代码上下文，批量队列也能继续使用轻量
-/// 批请求，同时避免 Service 与 Router 互相强持有。
 @MainActor
-final class TypeSafeTagSuggestionRouter {
-    private let typesafeProvider: TypeSafeDecisionService
+final class DecisionTagSuggestionRouter {
+    private let decisionProvider: RepositoryDecisionService
     private let settings: AppSettings
 
     init(
-        typesafeProvider: TypeSafeDecisionService,
+        decisionProvider: RepositoryDecisionService,
         settings: AppSettings
     ) {
-        self.typesafeProvider = typesafeProvider
+        self.decisionProvider = decisionProvider
         self.settings = settings
     }
 
-    var isRoutingToTypesafe: Bool {
-        settings.typesafeDecisionEnabled
-            && settings.typesafeTagSuggestionsEnabled
-            && typesafeProvider.canResolveAPIKey()
+    var isRoutingToDecisionEngine: Bool {
+        settings.decisionEngineEnabled
+            && settings.decisionTagSuggestionsEnabled
+            && decisionProvider.isSelectedEngineAvailable
     }
 
     func generateTagSuggestions(
@@ -116,12 +92,12 @@ final class TypeSafeTagSuggestionRouter {
         ) async throws -> [Int64: [AITagSuggestion]]
     ) async throws -> [Int64: [AITagSuggestion]] {
         guard !repos.isEmpty else { return [:] }
-        guard isRoutingToTypesafe else {
+        guard isRoutingToDecisionEngine else {
             return try await llmFallback(repos, tagHintsByRepoID, .reuseFirst)
         }
 
         do {
-            let reusableResults = try await typesafeProvider.generateBatchTagSuggestions(
+            let reusableResults = try await decisionProvider.generateBatchTagSuggestions(
                 for: repos,
                 tagHintsByRepoID: tagHintsByRepoID
             )
@@ -139,8 +115,8 @@ final class TypeSafeTagSuggestionRouter {
             let fallbackHints = Dictionary(uniqueKeysWithValues: fallbackRepos.map { repo in
                 (repo.id, tagHintsByRepoID[repo.id] ?? .empty)
             })
-            // LLM 只补词表外的新概念。它的产出直接进入审核 / 阈值应用，不再回送 Jev，
-            // 否则新标签天然缺少历史样本，低分会让这次 LLM 调用变成无效消耗。
+            // 决策模型只复用既有词表；确需新概念时仍由 LLM 生成一次，新标签不再
+            // 回送决策引擎二次否决，否则缺少历史样本的新词会天然吃亏。
             let generatedResults = try await llmFallback(fallbackRepos, fallbackHints, .newOnly)
 
             var mergedResults = Dictionary(uniqueKeysWithValues: repos.map { repo in
@@ -164,17 +140,15 @@ final class TypeSafeTagSuggestionRouter {
                     vocabulary: [],
                     maximumSuggestionCount: 1
                 )
-                // 一旦 Jev 判定旧标签不足并实际调用了 LLM，有效新标签必须保留；否则低分
-                // 旧标签占满 maximum 后会把新标签截掉，形成“付费生成但结果不可见”的浪费。
                 let reusableLimit = max(0, maximum - normalizedNew.count)
                 mergedResults[repo.id] = AITagSuggestionPolicy.sortedByConfidenceDescending(
                     Array(reusable.prefix(reusableLimit)) + normalizedNew
                 )
             }
             return mergedResults
-        } catch let error as TypeSafeClientError {
+        } catch {
             AppLog.ai.error(
-                "[typesafePOC] tag suggestions failed, surfacing error: \(error.localizedDescription, privacy: .public)"
+                "[decisionEngine] tag suggestions failed, surfacing error: \(error.localizedDescription, privacy: .public)"
             )
             throw error
         }

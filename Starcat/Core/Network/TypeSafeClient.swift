@@ -269,7 +269,7 @@ actor TypeSafeClient {
     /// - Parameters:
     ///   - state: 任意 Encodable(对象 / 字符串 / 数组);调用方用小结构体描述
     ///     被判断对象,只带该问题需要的上下文(官方「Decompose state」原则)。
-    ///   - model: 固定版本模型 ID,由 `TypeSafeDecisionService` 统一解析。
+    ///   - model: 固定版本模型 ID,由 `JevDecisionEngine` 统一解析。
     ///   - questions: question id → 问题;共享同一 state,一次请求并行评估。
     ///   - apiKey: BYOK,逐次传入。
     ///   - api: 原生 TypeSafe 或 OpenRouter Decisions；默认保持原生行为。

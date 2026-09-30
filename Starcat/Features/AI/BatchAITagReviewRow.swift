@@ -320,6 +320,8 @@ struct BatchAITagReviewRow: View {
         switch suggestion.engine {
         case .some(.jev):
             return "batchAI.panel.review.modelOrigin.jev"
+        case .some(.laya):
+            return "batchAI.panel.review.modelOrigin.laya"
         case .some(.llm):
             return "batchAI.panel.review.modelOrigin.llm"
         case .some(.local):

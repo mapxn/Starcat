@@ -93,7 +93,7 @@ actor LocalAIModelDownloader {
     ///
     /// - Parameters:
     ///   - remotePath: 形如 `<repo>/resolve/<revision>/<file>` 的服务端相对/绝对路径。
-    ///   - fileName: 落盘文件名。
+    ///   - fileName: 相对目标目录的落盘路径，可包含受控子目录。
     ///   - expectedTotalBytes: catalog 预估体积（仅用于磁盘预检，不作为硬校验）。
     func downloadFile(
         remoteURL: URL,
@@ -103,6 +103,14 @@ actor LocalAIModelDownloader {
         expectedTotalBytes: Int64?,
         onProgress: ProgressHandler?
     ) async throws -> LocalAIDownloadResult {
+        let pathComponents = fileName.split(separator: "/", omittingEmptySubsequences: false)
+        guard !fileName.isEmpty,
+              !fileName.hasPrefix("/"),
+              pathComponents.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
+        else {
+            // catalog 最终可能来自远端元数据；允许子目录不等于允许逃出模型目录。
+            throw LocalAIDownloadError.invalidURL(fileName)
+        }
         // .part 按下载源隔离：不同源的权重内容不保证逐字节一致（镜像/版本差异），
         // 跨源复用断点会把两份数据混写成一个文件。
         let partURL = destinationDirectory.appendingPathComponent(
@@ -112,6 +120,17 @@ actor LocalAIModelDownloader {
         // 目录准备 + 已完成文件短路（重试场景：前面的文件已下好）。
         try FileManager.default.createDirectory(
             at: destinationDirectory, withIntermediateDirectories: true)
+        // Laya 等 checkpoint 会保留上游子目录（如 encoder/config.json）。下载器必须
+        // 为最终文件和同目录 `.part` 一并建父目录，不能要求 catalog 把层级拍平；
+        // 拍平会破坏 tokenizer / encoder 按相对路径加载的协议。
+        try FileManager.default.createDirectory(
+            at: finalURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: partURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         if FileManager.default.fileExists(atPath: finalURL.path) {
             let size = (try? FileManager.default.attributesOfItem(
                 atPath: finalURL.path)[.size] as? Int64) ?? 0
@@ -136,7 +155,10 @@ actor LocalAIModelDownloader {
         defer { runningTask = nil }
 
         do {
-            let result = try await task.value
+            var result = try await task.value
+            // stream 层只看到最终 URL，`lastPathComponent` 会丢掉 encoder/ 等相对层级；
+            // manifest 必须保留调用方传入的完整相对路径才能做完整性校验。
+            result.name = fileName
             return result
         } catch is CancellationError {
             throw LocalAIDownloadError.cancelled

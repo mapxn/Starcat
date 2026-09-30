@@ -1246,30 +1246,39 @@ final class AppSettings {
         didSet { persistJSON(key: Keys.externalSearchProviderSettings, value: externalSearchProviderSettings) }
     }
 
-    // MARK: - 实验性功能 Labs：TypeSafe Jev 决策引擎（2026-09-18 引入，POC）
+    // MARK: - 实验性功能 Labs：决策引擎
 
-    /// Jev 决策引擎总开关（默认 false）。
+    /// 实验性决策引擎总开关（默认 false）。
     ///
-    /// 这是所有 Jev 路由的第一道门：关闭时两个路由器逐字节透传既有 LLM 路径。
-    /// 子开关、原生与 OpenRouter 凭据均不可用时同样回退 LLM，不产生半开状态。
-    var typesafeDecisionEnabled: Bool {
-        didSet { persistBool(key: Keys.typesafeDecisionEnabled, value: typesafeDecisionEnabled) }
+    /// 关闭、所选引擎未注册或当前不可用时，两个业务路由都回退既有 LLM；一旦引擎
+    /// 已经开始执行，错误不会触发第二次引擎/LLM 调用。
+    var decisionEngineEnabled: Bool {
+        didSet { persistBool(key: Keys.decisionEngineEnabled, value: decisionEngineEnabled) }
     }
 
-    /// Jev 接管仓库分组建议生成（默认 false）。
-    ///
-    /// 手动整理与后台自动分组共用同一路由；候选校验、置信度阈值和自动写入边界
-    /// 仍由 `GitHubStarListAIGroupingSession` 负责。
-    var typesafeGroupingSuggestionsEnabled: Bool {
-        didSet { persistBool(key: Keys.typesafeGroupingSuggestionsEnabled, value: typesafeGroupingSuggestionsEnabled) }
+    /// 用户显式选择的决策引擎。默认 Jev，切换只影响后续请求。
+    var decisionEngineID: DecisionEngineID {
+        didSet { persist(key: Keys.decisionEngineID, value: decisionEngineID.rawValue) }
     }
 
-    /// Jev 接管所有 AI 标签建议的现有词表判断（默认 false）。
-    ///
-    /// 单仓标签、纯标签批量、摘要+标签混合任务与自动整理统一走
-    /// `TypeSafeTagSuggestionRouter`；关闭或缺少 Key 时回退原 LLM 路径。
-    var typesafeTagSuggestionsEnabled: Bool {
-        didSet { persistBool(key: Keys.typesafeTagSuggestionsEnabled, value: typesafeTagSuggestionsEnabled) }
+    /// 所选决策引擎接管仓库分组建议生成（默认 false）。
+    var decisionGroupingSuggestionsEnabled: Bool {
+        didSet {
+            persistBool(
+                key: Keys.decisionGroupingSuggestionsEnabled,
+                value: decisionGroupingSuggestionsEnabled
+            )
+        }
+    }
+
+    /// 所选决策引擎接管所有 AI 标签建议中的现有词表判断（默认 false）。
+    var decisionTagSuggestionsEnabled: Bool {
+        didSet {
+            persistBool(
+                key: Keys.decisionTagSuggestionsEnabled,
+                value: decisionTagSuggestionsEnabled
+            )
+        }
     }
 
     /// 原生 TypeSafe Key 最近一次显式连接测试是否失败（默认 false）。
@@ -2112,11 +2121,47 @@ final class AppSettings {
         self.smartSearchMode = searchModeRaw.flatMap(SmartSearchMode.init(rawValue:)) ?? .keyword
         self.externalSearchIncludeInAll = defaults.object(forKey: Keys.externalSearchIncludeInAll) as? Bool ?? false
         self.externalContextEnabled = defaults.object(forKey: Keys.externalContextEnabled) as? Bool ?? false
-        self.typesafeDecisionEnabled = defaults.object(forKey: Keys.typesafeDecisionEnabled) as? Bool ?? false
-        self.typesafeGroupingSuggestionsEnabled = defaults.object(forKey: Keys.typesafeGroupingSuggestionsEnabled) as? Bool ?? false
-        self.typesafeTagSuggestionsEnabled = defaults.object(forKey: Keys.typesafeTagSuggestionsEnabled) as? Bool ?? false
+        // Jev POC 的三个开关已发给测试用户；首次升级时一次性迁移到通用决策引擎
+        // 配置并固定选择 Jev。新 key 一旦存在，后续启动不再读取 legacy key，避免双轨。
+        if defaults.object(forKey: Keys.decisionEngineEnabled) != nil {
+            self.decisionEngineEnabled = defaults.object(
+                forKey: Keys.decisionEngineEnabled
+            ) as? Bool ?? false
+            self.decisionEngineID = defaults.string(forKey: Keys.decisionEngineID)
+                .flatMap(DecisionEngineID.init(rawValue:)) ?? .jev
+            self.decisionGroupingSuggestionsEnabled = defaults.object(
+                forKey: Keys.decisionGroupingSuggestionsEnabled
+            ) as? Bool ?? false
+            self.decisionTagSuggestionsEnabled = defaults.object(
+                forKey: Keys.decisionTagSuggestionsEnabled
+            ) as? Bool ?? false
+        } else {
+            let migratedEnabled = defaults.object(
+                forKey: Keys.legacyTypesafeDecisionEnabled
+            ) as? Bool ?? false
+            let migratedGrouping = defaults.object(
+                forKey: Keys.legacyTypesafeGroupingSuggestionsEnabled
+            ) as? Bool ?? false
+            let migratedTags = defaults.object(
+                forKey: Keys.legacyTypesafeTagSuggestionsEnabled
+            ) as? Bool ?? false
+            self.decisionEngineEnabled = migratedEnabled
+            self.decisionEngineID = .jev
+            self.decisionGroupingSuggestionsEnabled = migratedGrouping
+            self.decisionTagSuggestionsEnabled = migratedTags
+            defaults.set(migratedEnabled, forKey: Keys.decisionEngineEnabled)
+            defaults.set(DecisionEngineID.jev.rawValue, forKey: Keys.decisionEngineID)
+            defaults.set(
+                migratedGrouping,
+                forKey: Keys.decisionGroupingSuggestionsEnabled
+            )
+            defaults.set(
+                migratedTags,
+                forKey: Keys.decisionTagSuggestionsEnabled
+            )
+        }
         self.typesafeNativeKeyTestFailed = defaults.object(forKey: Keys.typesafeNativeKeyTestFailed) as? Bool ?? false
-        self.typesafeModelID = defaults.string(forKey: Keys.typesafeModelID) ?? TypeSafeDecisionService.defaultModelID
+        self.typesafeModelID = defaults.string(forKey: Keys.typesafeModelID) ?? JevDecisionEngine.defaultModelID
         self.externalSearchAllowPrivateRepos = defaults.object(forKey: Keys.externalSearchAllowPrivateRepos) as? Bool ?? false
         let externalDefaultProviderRaw = defaults.string(forKey: Keys.externalSearchDefaultProvider)
         self.externalSearchDefaultProvider = externalDefaultProviderRaw
@@ -2425,11 +2470,12 @@ final class AppSettings {
         smartSearchMode = .keyword
         externalSearchIncludeInAll = false
         externalContextEnabled = false
-        typesafeDecisionEnabled = false
-        typesafeGroupingSuggestionsEnabled = false
-        typesafeTagSuggestionsEnabled = false
+        decisionEngineEnabled = false
+        decisionEngineID = .jev
+        decisionGroupingSuggestionsEnabled = false
+        decisionTagSuggestionsEnabled = false
         typesafeNativeKeyTestFailed = false
-        typesafeModelID = TypeSafeDecisionService.defaultModelID
+        typesafeModelID = JevDecisionEngine.defaultModelID
         externalSearchAllowPrivateRepos = false
         externalSearchDefaultProvider = .anySearch
         externalContextProviderSelection = .automatic
@@ -3017,9 +3063,14 @@ final class AppSettings {
         static let smartSearchMode = "settings.search.mode"
         static let externalSearchIncludeInAll = "settings.externalSearch.includeInAll.v1"
         static let externalContextEnabled = "settings.externalSearch.context.enabled.v1"
-        static let typesafeDecisionEnabled = "settings.labs.typesafe.enabled.v1"
-        static let typesafeGroupingSuggestionsEnabled = "settings.labs.typesafe.grouping.v1"
-        static let typesafeTagSuggestionsEnabled = "settings.labs.typesafe.tags.v1"
+        static let decisionEngineEnabled = "settings.labs.decision.enabled.v1"
+        static let decisionEngineID = "settings.labs.decision.engine.v1"
+        static let decisionGroupingSuggestionsEnabled = "settings.labs.decision.grouping.v1"
+        static let decisionTagSuggestionsEnabled = "settings.labs.decision.tags.v1"
+        /// 仅供一次性 UserDefaults 迁移读取；应用层不再写回这些 POC key。
+        static let legacyTypesafeDecisionEnabled = "settings.labs.typesafe.enabled.v1"
+        static let legacyTypesafeGroupingSuggestionsEnabled = "settings.labs.typesafe.grouping.v1"
+        static let legacyTypesafeTagSuggestionsEnabled = "settings.labs.typesafe.tags.v1"
         static let typesafeNativeKeyTestFailed = "settings.labs.typesafe.nativeKeyTestFailed.v1"
         static let typesafeModelID = "settings.labs.typesafe.model.v1"
         static let externalSearchAllowPrivateRepos = "settings.externalSearch.context.allowPrivate.v1"

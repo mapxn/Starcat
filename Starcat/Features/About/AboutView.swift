@@ -1046,6 +1046,12 @@ private struct AboutDependency: Identifiable {
             url: URL(string: "https://github.com/BerriAI/litellm")
         ),
         AboutDependency(
+            name: "laya-mlx / Laya",
+            license: "Apache-2.0",
+            copyright: "Copyright 2026 laya-mlx contributors; Copyright Convai Innovations and Laya contributors",
+            url: URL(string: "https://github.com/mizorewww/laya-mlx")
+        ),
+        AboutDependency(
             name: "OpenSSF",
             license: "CDLA-2.0 / Apache-2.0",
             copyright: "Copyright 2020 OpenSSF Scorecard Authors",

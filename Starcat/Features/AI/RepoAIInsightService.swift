@@ -234,7 +234,7 @@ final class RepoAIInsightService {
     private let keychain: any KeychainManaging
     private let externalContextProvider: ExternalSearchContextProvider
     private let entitlementGate: EntitlementGate?
-    private let tagSuggestionRouter: TypeSafeTagSuggestionRouter?
+    private let tagSuggestionRouter: DecisionTagSuggestionRouter?
     private var repositoryInsightsContextProvider:
         (any RepositoryInsightsAIContextProviding)?
 
@@ -301,7 +301,7 @@ final class RepoAIInsightService {
         repositoryInsightsContextProvider:
             (any RepositoryInsightsAIContextProviding)? = nil,
         entitlementGate: EntitlementGate? = nil,
-        tagSuggestionRouter: TypeSafeTagSuggestionRouter? = nil,
+        tagSuggestionRouter: DecisionTagSuggestionRouter? = nil,
         onSummaryGenerated: (@MainActor (Repo) -> Void)? = nil
     ) {
         self.summaryRepository = summaryRepository
@@ -1091,7 +1091,7 @@ final class RepoAIInsightService {
         tagGenerationPolicy: AITagGenerationPolicy
     ) throws {
         _ = tagGenerationPolicy
-        let requiresLLMTagClient = includeTags && tagSuggestionRouter?.isRoutingToTypesafe != true
+        let requiresLLMTagClient = includeTags && tagSuggestionRouter?.isRoutingToDecisionEngine != true
         try ensureGenerationClientsReady(
             includeSummary: includeSummary,
             includeTags: requiresLLMTagClient

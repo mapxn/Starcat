@@ -24,6 +24,37 @@ struct AppSettingsTests {
         return defaults
     }
 
+    @Test("决策引擎:首次升级迁移 Jev POC 开关且后续只读新配置")
+    func migratesLegacyJevDecisionSettingsOnce() {
+        let defaults = makeIsolatedDefaults()
+        defaults.set(true, forKey: "settings.labs.typesafe.enabled.v1")
+        defaults.set(true, forKey: "settings.labs.typesafe.grouping.v1")
+        defaults.set(false, forKey: "settings.labs.typesafe.tags.v1")
+
+        let migrated = AppSettings(defaults: defaults)
+        #expect(migrated.decisionEngineEnabled)
+        #expect(migrated.decisionEngineID == .jev)
+        #expect(migrated.decisionGroupingSuggestionsEnabled)
+        #expect(!migrated.decisionTagSuggestionsEnabled)
+
+        migrated.decisionEngineID = .laya
+        migrated.decisionEngineEnabled = false
+        // legacy 值仍留在磁盘也不能在下一次启动覆盖用户的新选择。
+        defaults.set(true, forKey: "settings.labs.typesafe.enabled.v1")
+        let reloaded = AppSettings(defaults: defaults)
+        #expect(!reloaded.decisionEngineEnabled)
+        #expect(reloaded.decisionEngineID == .laya)
+    }
+
+    @Test("决策引擎:新安装默认关闭并选择 Jev")
+    func decisionEngineDefaults() {
+        let settings = AppSettings(defaults: makeIsolatedDefaults())
+        #expect(!settings.decisionEngineEnabled)
+        #expect(settings.decisionEngineID == .jev)
+        #expect(!settings.decisionGroupingSuggestionsEnabled)
+        #expect(!settings.decisionTagSuggestionsEnabled)
+    }
+
     // R-01 §3.1.1（2026-06-10 P1）：RepoListDensity 枚举 + AppSettings.listDensity
     // 属性已彻底删除。原 defaultDensity / densityPersists / invalidValueFallsBack
     // 三个测试随之失效（之前为保签名稳定保留单 case 是「自留技术债」，现在所有

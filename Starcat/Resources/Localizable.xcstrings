@@ -1,6 +1,363 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "settings.labs.decision.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Decision Engine"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "决策引擎"
+          }
+        }
+      }
+    },
+    "settings.labs.decision.enable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable decision engine"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用决策引擎"
+          }
+        }
+      }
+    },
+    "settings.labs.decision.enable.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose one typed-decision engine for repository grouping and existing-tag reuse. When disabled or unavailable, Starcat uses your configured AI provider."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为仓库分组与现有标签复用选择一个类型化决策引擎。关闭或所选引擎不可用时，Starcat 使用已配置的 AI Provider。"
+          }
+        }
+      }
+    },
+    "settings.labs.decision.engine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Implementation"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实现"
+          }
+        }
+      }
+    },
+    "settings.labs.decision.grouping" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use the decision engine for repository grouping"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仓库分组使用决策引擎"
+          }
+        }
+      }
+    },
+    "settings.labs.decision.grouping.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to manually started grouping and background auto-grouping. Starcat still validates candidates and applies your configured confidence threshold before an automatic write."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时用于手动发起的仓库分组与后台自动分组。任何自动写入前，Starcat 仍会校验候选分组并应用你设置的置信度阈值。"
+          }
+        }
+      }
+    },
+    "settings.labs.decision.tags" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use the decision engine for tag suggestions"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签建议使用决策引擎"
+          }
+        }
+      }
+    },
+"settings.labs.decision.tags.pooled.description" : {
+  "extractionState" : "manual",
+  "localizations" : {
+    "en" : {
+      "stringUnit" : {
+        "state" : "translated",
+        "value" : "Applies to single-repository suggestions, tag-only batches, mixed summary-and-tag tasks, and Auto Tidy. The selected engine first reuses matching existing tags. In manual batches that allow new tags, uncovered repositories are pooled into one AI request; confirm up to five shared tags before reclassification. Auto Tidy never expands the vocabulary."
+      }
+    },
+    "zh-Hans" : {
+      "stringUnit" : {
+        "state" : "translated",
+        "value" : "用于单仓标签建议、纯标签批量、摘要与标签混合任务以及自动整理。所选引擎会优先复用匹配的现有标签；人工批量允许新增时，未覆盖仓库只汇总为一次 AI 请求，确认最多 5 个全局标签后再重新归类。自动整理不会扩充词表。"
+      }
+    }
+  }
+},
+    "settings.labs.decision.tags.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applies to single-repository suggestions, batch tasks, and Auto Tidy. The selected engine reuses existing tags first; when too few qualify and new tags are allowed, your AI provider generates at most one new tag."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于单仓标签建议、批量任务与自动整理。所选引擎优先复用现有标签；达到阈值的标签不足且允许新增时，再由 AI Provider 生成最多一个新标签。"
+          }
+        }
+      }
+    },
+    "settings.labs.decision.scope.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected engine only returns decisions and probabilities. Starcat keeps candidate validation, confidence thresholds, and write rules. A runtime failure is surfaced and never silently retried with another engine."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选引擎只返回决策与概率；候选校验、置信度阈值和写入规则仍由 Starcat 控制。运行时失败会直接展示，不会静默切换到其他引擎重跑。"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laya Local Model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laya 本地模型"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.model.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multilingual FP16 decision model with a 1,024-token context. The model runs entirely inside Starcat through MLX Swift."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持多语言、上下文 1,024 token 的 FP16 决策模型，通过 MLX Swift 完全在 Starcat 进程内运行。"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.status.notInstalled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Model not installed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型未安装"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.status.loading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading model into MLX"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在将模型载入 MLX"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.status.deleting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleting model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在删除模型"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.status.ready" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installed and ready"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装并可用"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.install" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载模型"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.delete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除模型"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.test" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test Model"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试模型"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.test.successFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ready · %1$@ ms · P(demo) = %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型可用 · %1$@ ms · P(demo) = %2$@"
+          }
+        }
+      }
+    },
+    "settings.labs.laya.localOnly.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The checkpoint is downloaded from Hugging Face. Inference stays on this Mac and does not require Python, PyTorch, or a remote API key."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checkpoint 从 Hugging Face 下载；推理始终留在本机，不依赖 Python、PyTorch 或远端 API Key。"
+          }
+        }
+      }
+    },
     "settings.labs.intro" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -88152,6 +88509,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Jev"
+          }
+        }
+      }
+    },
+    "batchAI.panel.review.modelOrigin.laya" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laya"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laya"
           }
         }
       }
