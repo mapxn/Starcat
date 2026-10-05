@@ -109,7 +109,7 @@ struct MCPSettingsTab: View {
                 Toggle(isOn: $settings.mcpAllowBatchWrites) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("settings.mcp.batchWrites.title")
-                        Text("settings.mcp.batchWrites.help")
+                        Text("settings.mcp.batchOrganize.help")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

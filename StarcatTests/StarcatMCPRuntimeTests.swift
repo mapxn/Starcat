@@ -33,7 +33,7 @@ struct StarcatMCPRuntimeTests {
         let list = await runtime.handle(Self.request(id: 2, method: "tools/list"))
         let listJSON = try Self.jsonObject(from: list)
         let tools = try #require((listJSON["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        #expect(tools.count == 23)
+        #expect(tools.count == 24)
         #expect(tools.contains { $0["name"] as? String == "starcat.get_capabilities" })
         #expect(tools.contains { $0["name"] as? String == "starcat.get_overview_statistics" })
         #expect(tools.contains { $0["name"] as? String == "starcat.get_ai_usage_statistics" })
@@ -47,6 +47,7 @@ struct StarcatMCPRuntimeTests {
         #expect(tools.contains { $0["name"] as? String == "starcat.star_repo" })
         #expect(tools.contains { $0["name"] as? String == "starcat.unstar_repo" })
         #expect(tools.contains { $0["name"] as? String == "starcat.list_repos_by_tag" })
+        #expect(tools.contains { $0["name"] as? String == "starcat.batch_organize_repos" })
         // knowledge.search 当前只完成内部共享 capability；不能在没有独立 MCP 契约评审时
         // 偷偷扩张已发布的公共 tool catalog。
         #expect(tools.contains { $0["name"] as? String == "starcat.search_knowledge" } == false)
@@ -133,6 +134,7 @@ struct StarcatMCPRuntimeTests {
         #expect(capabilities["private_notes_read"] as? Bool == true)
         #expect(capabilities["statistics_read"] as? Bool == true)
         #expect(capabilities["local_writes"] as? Bool == true)
+        #expect(capabilities["batch_writes"] as? Bool == true)
         #expect(capabilities["github_star_writes"] as? Bool == true)
         #expect(capabilities["loopback_only"] as? Bool == true)
 
@@ -183,6 +185,30 @@ struct StarcatMCPRuntimeTests {
         let missingTagError = try #require(missingTagResult["structuredContent"] as? [String: Any])
         #expect(missingTagError["code"] as? String == "NOT_FOUND")
         #expect(missingTagError["message"] as? String == "Tag not found: act/missing")
+
+        let batchDryRunCall = await runtime.handle(Self.request(
+            id: 32,
+            method: "tools/call",
+            params: [
+                "name": "starcat.batch_organize_repos",
+                "arguments": [
+                    "items": [
+                        ["repo_id": 1, "tags": ["act/test"], "note": "queued"],
+                        ["owner": "openai", "name": "codex", "note": ""]
+                    ],
+                    "create_missing": false,
+                    "dry_run": true
+                ]
+            ]
+        ))
+        let batchDryRunJSON = try Self.jsonObject(from: batchDryRunCall)
+        let batchDryRunResult = try #require(batchDryRunJSON["result"] as? [String: Any])
+        #expect(batchDryRunResult["isError"] as? Bool != true)
+        let batchDryRun = try #require(batchDryRunResult["structuredContent"] as? [String: Any])
+        #expect(batchDryRun["dry_run"] as? Bool == true)
+        #expect(batchDryRun["requested_count"] as? Int == 2)
+        #expect(batchDryRun["succeeded_count"] as? Int == 2)
+        #expect(batchDryRun["failed_count"] as? Int == 0)
 
         let contextCall = await runtime.handle(Self.request(
             id: 21,
@@ -307,7 +333,7 @@ struct StarcatMCPRuntimeTests {
         let list = await runtime.handle(Self.request(id: 3, method: "tools/list"))
         let listJSON = try Self.jsonObject(from: list)
         let tools = try #require((listJSON["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        #expect(tools.count == 23)
+        #expect(tools.count == 24)
     }
 
     @Test("临时 Runtime 只暴露 Agent allowlist 并拒绝越权调用")
@@ -548,6 +574,7 @@ struct StarcatMCPRuntimeTests {
         let settings = AppSettings(defaults: UserDefaults(suiteName: "test.starcat.mcp.runtime.\(UUID().uuidString)")!)
         settings.mcpExposePrivateNotes = exposePrivateNotes
         settings.mcpAllowLocalWrites = true
+        settings.mcpAllowBatchWrites = true
         settings.mcpAllowGitHubStarWrites = true
 
         let gate = EntitlementGate(

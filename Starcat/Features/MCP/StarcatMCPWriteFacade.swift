@@ -23,6 +23,15 @@ protocol MCPStarMutationServicing: AnyObject {
 
 extension StarActionService: MCPStarMutationServicing {}
 
+/// 批量请求完成全量 preflight 后的不可变执行计划。
+private struct PreparedMCPBatchOrganizeItem {
+    let index: Int
+    let input: MCPBatchOrganizeItemInput
+    let repo: Repo
+    let tagNames: [String]
+    let warnings: [String]
+}
+
 @MainActor
 final class StarcatMCPWriteFacade {
     private let repoRepository: any RepoRepositoryProtocol
@@ -140,6 +149,195 @@ final class StarcatMCPWriteFacade {
                 targetFullName: repo.fullName,
                 repo: updated
             )
+        }
+    }
+
+    /// 在一次 MCP 往返中为多个仓库添加标签和/或更新笔记。
+    ///
+    /// 所有项目先以 dry-run 走现有 Capability，任一确定性校验失败时整批不写入；正式执行
+    /// 仍按仓库顺序处理，运行期错误逐项返回。不同 Capability 无法共享数据库事务，因此
+    /// 失败项用 `partial_write_possible` 明确暴露重试边界。
+    func batchOrganizeRepos(
+        items: [MCPBatchOrganizeItemInput],
+        createMissing: Bool,
+        dryRun: Bool
+    ) async throws -> MCPBatchOrganizeResult {
+        let affectedTags = items.flatMap(\.tagNames)
+        do {
+            try validate(.batchWrite)
+            guard !items.isEmpty else {
+                throw StarcatMCPError.invalidArguments("items must contain at least one repository")
+            }
+            guard items.count <= 100 else {
+                throw StarcatMCPError.invalidArguments("items must contain no more than 100 repositories")
+            }
+
+            var preparedItems: [PreparedMCPBatchOrganizeItem] = []
+            preparedItems.reserveCapacity(items.count)
+            for (index, item) in items.enumerated() {
+                guard !item.tagNames.isEmpty || item.note != nil else {
+                    throw StarcatMCPError.invalidArguments(
+                        "items[\(index)] must provide non-empty tags or a note"
+                    )
+                }
+                let repo = try await resolveRepo(
+                    repoID: item.repoID,
+                    owner: item.owner,
+                    name: item.name
+                )
+
+                var resolvedTagNames: [String] = []
+                var warnings: [String] = []
+                if !item.tagNames.isEmpty {
+                    let preview = try await tagCapability.addTags(
+                        repoID: repo.id,
+                        tagNames: item.tagNames,
+                        createMissing: createMissing,
+                        dryRun: true
+                    )
+                    resolvedTagNames = preview.tags.map(\.name)
+                    warnings.append(contentsOf: preview.warnings)
+                }
+                if let note = item.note {
+                    _ = try await metadataCapability.upsertNote(
+                        repoID: repo.id,
+                        content: note,
+                        dryRun: true
+                    )
+                }
+                preparedItems.append(PreparedMCPBatchOrganizeItem(
+                    index: index,
+                    input: item,
+                    repo: repo,
+                    tagNames: resolvedTagNames,
+                    warnings: warnings
+                ))
+            }
+
+            if dryRun {
+                let results = preparedItems.map { prepared in
+                    MCPBatchOrganizeItemResult(
+                        index: prepared.index,
+                        ok: true,
+                        changed: false,
+                        partial_write_possible: false,
+                        repo: MCPRepoDTO(repo: prepared.repo),
+                        tag_names: prepared.tagNames,
+                        note_requested: prepared.input.note != nil,
+                        warnings: prepared.warnings,
+                        error: nil
+                    )
+                }
+                for (prepared, result) in zip(preparedItems, results) {
+                    await auditLog.record(
+                        tool: "starcat.batch_organize_repos",
+                        permission: .batchWrite,
+                        dryRun: true,
+                        success: true,
+                        repo: prepared.repo,
+                        batchIndex: prepared.index,
+                        affectedTags: prepared.input.tagNames,
+                        warnings: result.warnings,
+                        error: nil
+                    )
+                }
+                return MCPBatchOrganizeResult(dryRun: true, results: results)
+            }
+
+            var results: [MCPBatchOrganizeItemResult] = []
+            results.reserveCapacity(preparedItems.count)
+            for prepared in preparedItems {
+                var changed = false
+                var operationStarted = false
+                var resolvedTagNames = prepared.tagNames
+                var warnings: [String] = []
+                do {
+                    if !prepared.input.tagNames.isEmpty {
+                        operationStarted = true
+                        let mutation = try await tagCapability.addTags(
+                            repoID: prepared.repo.id,
+                            tagNames: prepared.input.tagNames,
+                            createMissing: createMissing,
+                            dryRun: false
+                        )
+                        changed = changed || mutation.changed
+                        resolvedTagNames = mutation.tags.map(\.name)
+                        warnings.append(contentsOf: mutation.warnings)
+                    }
+                    if let note = prepared.input.note {
+                        operationStarted = true
+                        let mutation = try await metadataCapability.upsertNote(
+                            repoID: prepared.repo.id,
+                            content: note,
+                            dryRun: false
+                        )
+                        changed = changed || mutation.changed
+                    }
+
+                    let result = MCPBatchOrganizeItemResult(
+                        index: prepared.index,
+                        ok: true,
+                        changed: changed,
+                        partial_write_possible: false,
+                        repo: MCPRepoDTO(repo: prepared.repo),
+                        tag_names: resolvedTagNames,
+                        note_requested: prepared.input.note != nil,
+                        warnings: warnings,
+                        error: nil
+                    )
+                    results.append(result)
+                    await auditLog.record(
+                        tool: "starcat.batch_organize_repos",
+                        permission: .batchWrite,
+                        dryRun: false,
+                        success: true,
+                        repo: prepared.repo,
+                        batchIndex: prepared.index,
+                        affectedTags: prepared.input.tagNames,
+                        warnings: warnings,
+                        error: nil
+                    )
+                } catch {
+                    let outwardError = Self.mapCapabilityError(error)
+                    let result = MCPBatchOrganizeItemResult(
+                        index: prepared.index,
+                        ok: false,
+                        changed: changed,
+                        partial_write_possible: operationStarted,
+                        repo: MCPRepoDTO(repo: prepared.repo),
+                        tag_names: resolvedTagNames,
+                        note_requested: prepared.input.note != nil,
+                        warnings: warnings,
+                        error: outwardError.localizedDescription
+                    )
+                    results.append(result)
+                    await auditLog.record(
+                        tool: "starcat.batch_organize_repos",
+                        permission: .batchWrite,
+                        dryRun: false,
+                        success: false,
+                        repo: prepared.repo,
+                        batchIndex: prepared.index,
+                        affectedTags: prepared.input.tagNames,
+                        warnings: warnings,
+                        error: outwardError.localizedDescription
+                    )
+                }
+            }
+            return MCPBatchOrganizeResult(dryRun: false, results: results)
+        } catch {
+            let outwardError = Self.mapCapabilityError(error)
+            await auditLog.record(
+                tool: "starcat.batch_organize_repos",
+                permission: .batchWrite,
+                dryRun: dryRun,
+                success: false,
+                repo: nil,
+                affectedTags: affectedTags,
+                warnings: [],
+                error: outwardError.localizedDescription
+            )
+            throw outwardError
         }
     }
 

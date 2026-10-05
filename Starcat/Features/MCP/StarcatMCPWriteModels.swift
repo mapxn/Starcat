@@ -52,6 +52,57 @@ struct MCPStarWriteResult: Codable, Sendable {
     }
 }
 
+/// 批量整理请求中的单个仓库输入。
+///
+/// `note == nil` 表示不处理笔记，空字符串则表示清空笔记；二者不能合并，否则 Agent
+/// 无法在同一批请求中区分“保持不变”和“主动清空”。
+struct MCPBatchOrganizeItemInput: Sendable {
+    let repoID: Int64?
+    let owner: String?
+    let name: String?
+    let tagNames: [String]
+    let note: String?
+}
+
+/// 批量整理中一个仓库的执行结果。失败项显式标记是否可能已发生部分写入，避免把
+/// 跨 Repository/Capability 的顺序执行误解为数据库事务。
+struct MCPBatchOrganizeItemResult: Codable, Sendable {
+    let index: Int
+    let ok: Bool
+    let changed: Bool
+    let partial_write_possible: Bool
+    let repo: MCPRepoDTO
+    let tag_names: [String]
+    let note_requested: Bool
+    let warnings: [String]
+    let error: String?
+}
+
+/// 批量标签/笔记写入的汇总结果。
+struct MCPBatchOrganizeResult: Codable, Sendable {
+    let ok: Bool
+    let dry_run: Bool
+    let permission: String
+    let action: String
+    let requested_count: Int
+    let succeeded_count: Int
+    let failed_count: Int
+    let changed_count: Int
+    let results: [MCPBatchOrganizeItemResult]
+
+    init(dryRun: Bool, results: [MCPBatchOrganizeItemResult]) {
+        self.ok = results.allSatisfy(\.ok)
+        self.dry_run = dryRun
+        self.permission = StarcatMCPWritePermission.batchWrite.rawValue
+        self.action = "batch_organize_repos"
+        self.requested_count = results.count
+        self.succeeded_count = results.filter { $0.ok }.count
+        self.failed_count = results.filter { !$0.ok }.count
+        self.changed_count = results.filter { $0.changed }.count
+        self.results = results
+    }
+}
+
 /// MCP 写入工具统一返回格式。
 struct MCPWriteResult: Codable, Sendable {
     let ok: Bool

@@ -1577,7 +1577,8 @@ final class AppSettings {
 
     /// 是否允许 MCP 批量写入。
     ///
-    /// P0 先作为权限边界落地；批量工具后续接入时必须走这个开关和单次数量限制。
+    /// `batch_organize_repos` 还要求本地写入同时开启，并在 Facade 层限制单次最多
+    /// 100 个仓库；避免 Agent 因一次过大的请求长时间占用本地写队列。
     var mcpAllowBatchWrites: Bool {
         didSet { persistBool(key: Keys.mcpAllowBatchWrites, value: mcpAllowBatchWrites) }
     }

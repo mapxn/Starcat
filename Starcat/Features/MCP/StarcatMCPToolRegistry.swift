@@ -323,6 +323,28 @@ final class StarcatMCPToolRegistry {
                 annotations: .init(readOnlyHint: false, openWorldHint: false)
             ),
             Tool(
+                name: "starcat.batch_organize_repos",
+                title: "Batch organize repositories",
+                description: "Add tags and/or update private notes for up to 100 local repositories in one request. The entire request is preflighted before writes begin. Requires MCP local and batch writes in Starcat Settings.",
+                inputSchema: Self.objectSchema([
+                    "items": Self.arraySchema(
+                        "Repository operations. Each item must provide repo_id or owner/name plus non-empty tags and/or note.",
+                        items: Self.batchOrganizeItemSchema(),
+                        minimumItems: 1,
+                        maximumItems: 100
+                    ),
+                    "create_missing": Self.booleanSchema(
+                        "Create tag names that do not already exist. Defaults to false to protect the curated tag vocabulary.",
+                        defaultValue: false
+                    ),
+                    "dry_run": Self.booleanSchema(
+                        "Validate every item without persisting tags or notes.",
+                        defaultValue: false
+                    )
+                ], required: ["items"]),
+                annotations: .init(readOnlyHint: false, openWorldHint: false)
+            ),
+            Tool(
                 name: "starcat.remove_repo_tags",
                 title: "Remove repo tags",
                 description: "Remove one or more tags from a repository. Missing tag names are ignored. Requires MCP local writes in Starcat Settings.",
@@ -519,6 +541,14 @@ final class StarcatMCPToolRegistry {
                     name: selector.name,
                     tagNames: try Self.stringArray(params.arguments, "tags"),
                     createMissing: Self.bool(params.arguments, "create_missing", defaultValue: true),
+                    dryRun: Self.bool(params.arguments, "dry_run", defaultValue: false)
+                )
+                return try Self.result(value)
+
+            case "starcat.batch_organize_repos":
+                let value = try await writeFacade.batchOrganizeRepos(
+                    items: try Self.batchOrganizeItems(from: params.arguments),
+                    createMissing: Self.bool(params.arguments, "create_missing", defaultValue: false),
                     dryRun: Self.bool(params.arguments, "dry_run", defaultValue: false)
                 )
                 return try Self.result(value)
@@ -773,6 +803,30 @@ final class StarcatMCPToolRegistry {
         ])
     }
 
+    private static func arraySchema(
+        _ description: String,
+        items: Value,
+        minimumItems: Int,
+        maximumItems: Int
+    ) -> Value {
+        .object([
+            "type": .string("array"),
+            "description": .string(description),
+            "items": items,
+            "minItems": .int(minimumItems),
+            "maxItems": .int(maximumItems)
+        ])
+    }
+
+    private static func batchOrganizeItemSchema() -> Value {
+        objectSchema(
+            repoSelectorProperties().merging([
+                "tags": stringArraySchema("Tag names to add. Omit when only updating the note."),
+                "note": stringSchema("Private Markdown note content. An empty string clears the note; omit to keep it unchanged.")
+            ]) { _, new in new }
+        )
+    }
+
     private static func bool(_ arguments: [String: Value]?, _ key: String, defaultValue: Bool) -> Bool {
         arguments?[key]?.boolValue ?? defaultValue
     }
@@ -786,6 +840,37 @@ final class StarcatMCPToolRegistry {
             throw StarcatMCPError.invalidArguments("\(key) must be an array of strings")
         }
         return strings
+    }
+
+    private static func batchOrganizeItems(
+        from arguments: [String: Value]?
+    ) throws -> [MCPBatchOrganizeItemInput] {
+        guard let values = arguments?["items"]?.arrayValue else {
+            throw StarcatMCPError.invalidArguments("Missing required argument: items")
+        }
+        return try values.enumerated().map { index, value in
+            guard let object = value.objectValue else {
+                throw StarcatMCPError.invalidArguments("items[\(index)] must be an object")
+            }
+            let selector = repoSelector(from: object)
+            let tags = object["tags"] == nil ? [] : try stringArray(object, "tags")
+            let note: String?
+            if let rawNote = object["note"] {
+                guard let resolvedNote = rawNote.stringValue else {
+                    throw StarcatMCPError.invalidArguments("items[\(index)].note must be a string")
+                }
+                note = resolvedNote
+            } else {
+                note = nil
+            }
+            return MCPBatchOrganizeItemInput(
+                repoID: selector.repoID,
+                owner: selector.owner,
+                name: selector.name,
+                tagNames: tags,
+                note: note
+            )
+        }
     }
 
     private static func prettyJSON<T: Encodable>(_ value: T) throws -> String {

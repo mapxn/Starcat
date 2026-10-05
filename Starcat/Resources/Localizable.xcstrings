@@ -358961,6 +358961,23 @@
         }
       }
     },
+    "settings.mcp.batchOrganize.help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow one MCP request to add tags and update private notes for up to 100 repositories. All items are validated before writing; local writes must also be enabled."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许单次 MCP 请求为最多 100 个仓库添加标签并更新私有笔记；开始写入前会先校验全部项目，同时还需开启本地写入。"
+          }
+        }
+      }
+    },
     "settings.mcp.batchWrites.help" : {
       "extractionState" : "manual",
       "localizations" : {
