@@ -266,8 +266,14 @@ struct LabsSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
         case .installed:
-            Label("settings.labs.laya.status.ready", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.secondary)
+            Label {
+                Text("settings.labs.laya.status.ready")
+                    .foregroundStyle(.secondary)
+            } icon: {
+                // 绿色只表达模型已经安装成功；状态文字继续保持设置页的次要层级。
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
         }
     }
 
@@ -307,16 +313,19 @@ struct LabsSettingsTab: View {
         case .idle, .testing:
             EmptyView()
         case let .succeeded(milliseconds, noul):
-            Label(
-                String(
+            Label {
+                Text(verbatim: String(
                     format: String.l10n("settings.labs.laya.test.successFormat"),
                     NSNumber(value: milliseconds),
                     String(format: "%.2f", noul)
-                ),
-                systemImage: "checkmark.circle.fill"
-            )
+                ))
+                .foregroundStyle(.secondary)
+            } icon: {
+                // 测试通过与安装完成使用同一成功色，避免灰色勾误读为未确认状态。
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
             .font(.caption)
-            .foregroundStyle(.secondary)
         case .failed(let message):
             Label(message, systemImage: "xmark.circle.fill")
                 .font(.caption)
