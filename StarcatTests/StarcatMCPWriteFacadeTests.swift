@@ -20,7 +20,9 @@ struct StarcatMCPWriteFacadeTests {
     private func makeSUT(
         isPro: Bool = true,
         allowLocalWrites: Bool = true,
-        allowDestructiveWrites: Bool = false
+        allowDestructiveWrites: Bool = false,
+        allowGitHubStarWrites: Bool = false,
+        starMutationService: MCPStarMutationServiceStub? = nil
     ) throws -> (
         StarcatMCPWriteFacade,
         GRDBRepoNoteRepository,
@@ -33,6 +35,7 @@ struct StarcatMCPWriteFacadeTests {
         let settings = AppSettings(defaults: UserDefaults(suiteName: "test.starcat.mcp.\(UUID().uuidString)")!)
         settings.mcpAllowLocalWrites = allowLocalWrites
         settings.mcpAllowDestructiveWrites = allowDestructiveWrites
+        settings.mcpAllowGitHubStarWrites = allowGitHubStarWrites
 
         let gate = EntitlementGate(
             entitlementProvider: TestProEntitlementProvider(isPro: isPro),
@@ -74,11 +77,97 @@ struct StarcatMCPWriteFacadeTests {
             repoRepository: repoRepository,
             metadataCapability: metadataCapability,
             tagCapability: tagCapability,
+            starMutationService: starMutationService ?? MCPStarMutationServiceStub(),
             settings: settings,
             entitlementGate: gate,
             auditLog: StarcatMCPAuditLog(fileURL: tmpLog)
         )
         return (facade, noteRepo, repoTagRepo, rawTagRepo, db, refreshCounter)
+    }
+
+    @Test("GitHub Star 写入关闭时拒绝调用远端 Service")
+    func githubStarWriteDisabledRejectsMutation() async throws {
+        let starService = MCPStarMutationServiceStub()
+        let (facade, _, _, _, _, _) = try makeSUT(starMutationService: starService)
+
+        do {
+            _ = try await facade.starRepo(
+                repoID: nil,
+                owner: "apple",
+                name: "swift",
+                dryRun: false
+            )
+            Issue.record("MCP GitHub Star writes disabled should reject the mutation")
+        } catch {
+            #expect(error.localizedDescription.contains("disabled"))
+        }
+
+        #expect(starService.starredTargets.isEmpty)
+    }
+
+    @Test("star_repo 可直接处理尚未进入本地缓存的 GitHub 搜索结果")
+    func starRepoAcceptsExternalOwnerAndName() async throws {
+        var starred = Repo.makeMinimal(owner: "apple", name: "swift")
+        starred.id = 99
+        starred.isStarred = true
+        let starService = MCPStarMutationServiceStub(starResult: starred)
+        let (facade, _, _, _, _, _) = try makeSUT(
+            allowGitHubStarWrites: true,
+            starMutationService: starService
+        )
+
+        let result = try await facade.starRepo(
+            repoID: nil,
+            owner: " apple ",
+            name: " swift ",
+            dryRun: false
+        )
+
+        #expect(result.changed == true)
+        #expect(result.target_full_name == "apple/swift")
+        #expect(result.repo?.id == 99)
+        #expect(starService.starredTargets == ["apple/swift"])
+    }
+
+    @Test("unstar_repo 复用远端 Service 且保留统一仓库选择语义")
+    func unstarRepoDelegatesToStarActionBoundary() async throws {
+        let starService = MCPStarMutationServiceStub()
+        let (facade, _, _, _, db, _) = try makeSUT(
+            allowGitHubStarWrites: true,
+            starMutationService: starService
+        )
+        try await db.insertRepoFixture(id: 7, owner: "octo", name: "remove-me")
+
+        let result = try await facade.unstarRepo(
+            repoID: nil,
+            owner: "octo",
+            name: "remove-me",
+            dryRun: false
+        )
+
+        #expect(result.changed == true)
+        #expect(starService.unstarredTargets == ["octo/remove-me"])
+    }
+
+    @Test("Star dry-run 不调用 GitHub 且仍返回明确目标")
+    func starRepoDryRunDoesNotCallRemoteService() async throws {
+        let starService = MCPStarMutationServiceStub()
+        let (facade, _, _, _, _, _) = try makeSUT(
+            allowGitHubStarWrites: true,
+            starMutationService: starService
+        )
+
+        let result = try await facade.starRepo(
+            repoID: nil,
+            owner: "openai",
+            name: "codex",
+            dryRun: true
+        )
+
+        #expect(result.dry_run == true)
+        #expect(result.changed == true)
+        #expect(result.target_full_name == "openai/codex")
+        #expect(starService.starredTargets.isEmpty)
     }
 
     @Test("本地写入关闭时 upsert_repo_note 被拒绝且不写库")
@@ -245,6 +334,27 @@ private final class TestProEntitlementProvider: ProEntitlementProviding {
 @MainActor
 private final class RefreshCounter {
     var count = 0
+}
+
+/// 隔离 GitHub 网络写入；Facade 测试只验证权限、目标解析与业务 Service 委托。
+@MainActor
+private final class MCPStarMutationServiceStub: MCPStarMutationServicing {
+    private let starResult: Repo
+    private(set) var starredTargets: [String] = []
+    private(set) var unstarredTargets: [String] = []
+
+    init(starResult: Repo = Repo.makeMinimal(owner: "test", name: "repo")) {
+        self.starResult = starResult
+    }
+
+    func star(owner: String, repo: String, displayedStarsCount: Int?) async throws -> Repo {
+        starredTargets.append("\(owner)/\(repo)")
+        return starResult
+    }
+
+    func unstar(repo: Repo) async throws {
+        unstarredTargets.append(repo.fullName)
+    }
 }
 
 /// Notification 回调可能脱离 MainActor 执行；锁保护测试观察值，避免并发读写竞态。

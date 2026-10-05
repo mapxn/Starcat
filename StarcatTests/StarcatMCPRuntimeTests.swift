@@ -33,7 +33,7 @@ struct StarcatMCPRuntimeTests {
         let list = await runtime.handle(Self.request(id: 2, method: "tools/list"))
         let listJSON = try Self.jsonObject(from: list)
         let tools = try #require((listJSON["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        #expect(tools.count == 20)
+        #expect(tools.count == 22)
         #expect(tools.contains { $0["name"] as? String == "starcat.get_capabilities" })
         #expect(tools.contains { $0["name"] as? String == "starcat.get_overview_statistics" })
         #expect(tools.contains { $0["name"] as? String == "starcat.get_ai_usage_statistics" })
@@ -44,6 +44,8 @@ struct StarcatMCPRuntimeTests {
         #expect(tools.contains { $0["name"] as? String == "starcat.search_repos" })
         #expect(tools.contains { $0["name"] as? String == "starcat.semantic_search" })
         #expect(tools.contains { $0["name"] as? String == "starcat.global_search_repos" })
+        #expect(tools.contains { $0["name"] as? String == "starcat.star_repo" })
+        #expect(tools.contains { $0["name"] as? String == "starcat.unstar_repo" })
         // knowledge.search 当前只完成内部共享 capability；不能在没有独立 MCP 契约评审时
         // 偷偷扩张已发布的公共 tool catalog。
         #expect(tools.contains { $0["name"] as? String == "starcat.search_knowledge" } == false)
@@ -130,7 +132,23 @@ struct StarcatMCPRuntimeTests {
         #expect(capabilities["private_notes_read"] as? Bool == true)
         #expect(capabilities["statistics_read"] as? Bool == true)
         #expect(capabilities["local_writes"] as? Bool == true)
+        #expect(capabilities["github_star_writes"] as? Bool == true)
         #expect(capabilities["loopback_only"] as? Bool == true)
+
+        let starDryRunCall = await runtime.handle(Self.request(
+            id: 29,
+            method: "tools/call",
+            params: [
+                "name": "starcat.star_repo",
+                "arguments": ["owner": "github", "name": "hub", "dry_run": true]
+            ]
+        ))
+        let starDryRunJSON = try Self.jsonObject(from: starDryRunCall)
+        let starDryRunResult = try #require(starDryRunJSON["result"] as? [String: Any])
+        #expect(starDryRunResult["isError"] as? Bool != true)
+        let starDryRun = try #require(starDryRunResult["structuredContent"] as? [String: Any])
+        #expect(starDryRun["target_full_name"] as? String == "github/hub")
+        #expect(starDryRun["dry_run"] as? Bool == true)
 
         let contextCall = await runtime.handle(Self.request(
             id: 21,
@@ -255,7 +273,7 @@ struct StarcatMCPRuntimeTests {
         let list = await runtime.handle(Self.request(id: 3, method: "tools/list"))
         let listJSON = try Self.jsonObject(from: list)
         let tools = try #require((listJSON["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        #expect(tools.count == 20)
+        #expect(tools.count == 22)
     }
 
     @Test("临时 Runtime 只暴露 Agent allowlist 并拒绝越权调用")
@@ -496,6 +514,7 @@ struct StarcatMCPRuntimeTests {
         let settings = AppSettings(defaults: UserDefaults(suiteName: "test.starcat.mcp.runtime.\(UUID().uuidString)")!)
         settings.mcpExposePrivateNotes = exposePrivateNotes
         settings.mcpAllowLocalWrites = true
+        settings.mcpAllowGitHubStarWrites = true
 
         let gate = EntitlementGate(
             entitlementProvider: MCPRuntimeTestEntitlementProvider(isPro: true),
@@ -589,6 +608,7 @@ struct StarcatMCPRuntimeTests {
                     repoTagRepository: repoTagRepository
                 )
             ),
+            starMutationService: MCPRuntimeStarMutationServiceStub(),
             settings: settings,
             entitlementGate: gate,
             auditLog: StarcatMCPAuditLog(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("starcat-mcp-runtime-\(UUID().uuidString).jsonl"))
@@ -728,4 +748,14 @@ private final class MCPRuntimeTestEntitlementProvider: ProEntitlementProviding {
             source: isPro ? .testEnvironment : .none
         )
     }
+}
+
+/// Runtime 测试只验证 MCP 协议分发；任何非 dry-run 调用都不应触达真实 GitHub。
+@MainActor
+private final class MCPRuntimeStarMutationServiceStub: MCPStarMutationServicing {
+    func star(owner: String, repo: String, displayedStarsCount: Int?) async throws -> Repo {
+        Repo.makeMinimal(owner: owner, name: repo)
+    }
+
+    func unstar(repo: Repo) async throws {}
 }

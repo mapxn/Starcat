@@ -96,6 +96,16 @@ struct MCPSettingsTab: View {
                     }
                 }
 
+                Toggle(isOn: $settings.mcpAllowGitHubStarWrites) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("settings.mcp.githubStarWrites.title")
+                        Text("settings.mcp.githubStarWrites.help")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
                 Toggle(isOn: $settings.mcpAllowBatchWrites) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("settings.mcp.batchWrites.title")

@@ -50,6 +50,8 @@ actor StarcatMCPAuditLog {
         dryRun: Bool,
         success: Bool,
         repo: Repo?,
+        repoID: Int64? = nil,
+        repoFullName: String? = nil,
         affectedTags: [String],
         warnings: [String],
         error: String?
@@ -61,8 +63,8 @@ actor StarcatMCPAuditLog {
             permission: permission.rawValue,
             dryRun: dryRun,
             success: success,
-            repoId: repo?.id,
-            repoFullName: repo?.fullName,
+            repoId: repoID ?? repo?.id,
+            repoFullName: repoFullName ?? repo?.fullName,
             affectedTags: affectedTags,
             warnings: warnings,
             error: error
@@ -90,4 +92,3 @@ actor StarcatMCPAuditLog {
         }
     }
 }
-

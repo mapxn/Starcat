@@ -1567,6 +1567,14 @@ final class AppSettings {
         didSet { persistBool(key: Keys.mcpAllowLocalWrites, value: mcpAllowLocalWrites) }
     }
 
+    /// 是否允许 MCP 修改用户 GitHub 账号中的 Star 状态。
+    ///
+    /// 远端 Star/Unstar 会调用 GitHub API，影响范围不同于本地 notes/tags 写入，
+    /// 因此必须使用独立且默认关闭的授权，不能随本地写入开关一并放行。
+    var mcpAllowGitHubStarWrites: Bool {
+        didSet { persistBool(key: Keys.mcpAllowGitHubStarWrites, value: mcpAllowGitHubStarWrites) }
+    }
+
     /// 是否允许 MCP 批量写入。
     ///
     /// P0 先作为权限边界落地；批量工具后续接入时必须走这个开关和单次数量限制。
@@ -2309,6 +2317,7 @@ final class AppSettings {
         self.mcpAllowRemoteConnections = defaults.object(forKey: Keys.mcpAllowRemoteConnections) as? Bool ?? false
         self.mcpExposePrivateNotes = defaults.object(forKey: Keys.mcpExposePrivateNotes) as? Bool ?? false
         self.mcpAllowLocalWrites = defaults.object(forKey: Keys.mcpAllowLocalWrites) as? Bool ?? false
+        self.mcpAllowGitHubStarWrites = defaults.object(forKey: Keys.mcpAllowGitHubStarWrites) as? Bool ?? false
         self.mcpAllowBatchWrites = defaults.object(forKey: Keys.mcpAllowBatchWrites) as? Bool ?? false
         self.mcpAllowDestructiveWrites = defaults.object(forKey: Keys.mcpAllowDestructiveWrites) as? Bool ?? false
 
@@ -2517,6 +2526,7 @@ final class AppSettings {
         mcpAllowRemoteConnections = false
         mcpExposePrivateNotes = false
         mcpAllowLocalWrites = false
+        mcpAllowGitHubStarWrites = false
         mcpAllowBatchWrites = false
         mcpAllowDestructiveWrites = false
         isProUser = false
@@ -3114,6 +3124,7 @@ final class AppSettings {
         static let mcpAllowRemoteConnections = "settings.mcp.allowRemoteConnections.v1"
         static let mcpExposePrivateNotes = "settings.mcp.exposePrivateNotes.v1"
         static let mcpAllowLocalWrites = "settings.mcp.allowLocalWrites.v1"
+        static let mcpAllowGitHubStarWrites = "settings.mcp.allowGitHubStarWrites.v1"
         static let mcpAllowBatchWrites = "settings.mcp.allowBatchWrites.v1"
         static let mcpAllowDestructiveWrites = "settings.mcp.allowDestructiveWrites.v1"
         static let autoTidySettings = "settings.ai.autoTidy.v1"  // HOM-126
@@ -3221,6 +3232,7 @@ final class AppSettings {
             mcpAllowRemoteConnections,
             mcpExposePrivateNotes,
             mcpAllowLocalWrites,
+            mcpAllowGitHubStarWrites,
             mcpAllowBatchWrites,
             mcpAllowDestructiveWrites,
             autoTidySettings,

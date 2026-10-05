@@ -234,6 +234,28 @@ final class StarcatMCPToolRegistry {
                 annotations: .init(readOnlyHint: true, openWorldHint: false)
             ),
             Tool(
+                name: "starcat.star_repo",
+                title: "Star a GitHub repository",
+                description: "Star a repository on the user's GitHub account. owner/name may reference a GitHub search result that is not yet cached locally. Requires MCP GitHub Star writes in Starcat Settings.",
+                inputSchema: Self.objectSchema(
+                    Self.repoSelectorProperties().merging([
+                        "dry_run": Self.booleanSchema("Validate the remote write without changing GitHub or local data.", defaultValue: false)
+                    ]) { _, new in new }
+                ),
+                annotations: .init(readOnlyHint: false, openWorldHint: true)
+            ),
+            Tool(
+                name: "starcat.unstar_repo",
+                title: "Unstar a GitHub repository",
+                description: "Unstar a repository on the user's GitHub account while preserving its Starcat tags, notes, summaries, and other local data. Requires MCP GitHub Star writes in Starcat Settings.",
+                inputSchema: Self.objectSchema(
+                    Self.repoSelectorProperties().merging([
+                        "dry_run": Self.booleanSchema("Validate the remote write without changing GitHub or local data.", defaultValue: false)
+                    ]) { _, new in new }
+                ),
+                annotations: .init(readOnlyHint: false, openWorldHint: true)
+            ),
+            Tool(
                 name: "starcat.upsert_repo_note",
                 title: "Write private repo note",
                 description: "Write or clear a repository private note. Requires MCP local writes in Starcat Settings. Passing an empty content clears the note body.",
@@ -401,6 +423,26 @@ final class StarcatMCPToolRegistry {
             case "starcat.get_repo_note":
                 let selector = Self.repoSelector(from: params.arguments)
                 let value = try await facade.getRepoNote(repoID: selector.repoID, owner: selector.owner, name: selector.name)
+                return try Self.result(value)
+
+            case "starcat.star_repo":
+                let selector = Self.repoSelector(from: params.arguments)
+                let value = try await writeFacade.starRepo(
+                    repoID: selector.repoID,
+                    owner: selector.owner,
+                    name: selector.name,
+                    dryRun: Self.bool(params.arguments, "dry_run", defaultValue: false)
+                )
+                return try Self.result(value)
+
+            case "starcat.unstar_repo":
+                let selector = Self.repoSelector(from: params.arguments)
+                let value = try await writeFacade.unstarRepo(
+                    repoID: selector.repoID,
+                    owner: selector.owner,
+                    name: selector.name,
+                    dryRun: Self.bool(params.arguments, "dry_run", defaultValue: false)
+                )
                 return try Self.result(value)
 
             case "starcat.upsert_repo_note":

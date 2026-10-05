@@ -14,8 +14,42 @@ import Foundation
 /// MCP 写入权限等级。
 enum StarcatMCPWritePermission: String, Codable, Sendable {
     case localWrite = "local_write"
+    case githubStarWrite = "github_star_write"
     case batchWrite = "batch_write"
     case destructiveWrite = "destructive_write"
+}
+
+/// GitHub Star 写入结果。
+///
+/// `star_repo` 允许直接处理尚未进入本地数据库的 GitHub 仓库，因此 dry-run 时不一定
+/// 存在 `Repo`。单独保留 `target_full_name`，让 Agent 始终能核对本次远端操作目标。
+struct MCPStarWriteResult: Codable, Sendable {
+    let ok: Bool
+    let dry_run: Bool
+    let changed: Bool
+    let permission: String
+    let action: String
+    let target_full_name: String
+    let repo: MCPRepoDTO?
+    let warnings: [String]
+
+    init(
+        dryRun: Bool,
+        changed: Bool,
+        action: String,
+        targetFullName: String,
+        repo: Repo? = nil,
+        warnings: [String] = []
+    ) {
+        self.ok = true
+        self.dry_run = dryRun
+        self.changed = changed
+        self.permission = StarcatMCPWritePermission.githubStarWrite.rawValue
+        self.action = action
+        self.target_full_name = targetFullName
+        self.repo = repo.map(MCPRepoDTO.init(repo:))
+        self.warnings = warnings
+    }
 }
 
 /// MCP 写入工具统一返回格式。
@@ -52,4 +86,3 @@ struct MCPWriteResult: Codable, Sendable {
         self.warnings = warnings
     }
 }
-

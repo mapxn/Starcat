@@ -1279,6 +1279,26 @@ final class AppDependencies {
             entitlementGate: self.entitlementGate
         )
 
+        // Star 写入核心必须先于 MCP 门面装配：MCP 的 star/unstar 只能复用这条业务路径，
+        // 才能同步维护本地缓存、Undo 历史、活动账本和 Home 刷新。
+        let registry = StarredRegistry()
+        self.starredRegistry = registry
+        let starActionSvc = StarActionService(
+            apiClient: api,
+            repoRepository: repo,
+            registry: registry,
+            undoStarHistory: self.undoStarHistoryRepository,
+            userIDProvider: { [weak session] in
+                session?.state.user?.id
+            },
+            userNameProvider: { [weak session] in
+                session?.state.user?.login
+            },
+            homeRefresher: nil,
+            activityRepository: self.userRepoActivityRepository
+        )
+        self.starActionService = starActionSvc
+
         // Alfred 等外部启动器复用与 Search Center 相同的两个 Provider。服务保持长生命周期，
         // 这样 GitHub Provider 的 5 分钟会话缓存不会因每次 MCP 调用重建而失效。
         let globalRepositorySearchService = GlobalRepositorySearchService(
@@ -1332,6 +1352,7 @@ final class AppDependencies {
             repoRepository: repo,
             metadataCapability: repositoryMetadataCapability,
             tagCapability: repositoryTagCapability,
+            starMutationService: starActionSvc,
             settings: self.settings,
             entitlementGate: self.entitlementGate
         )
@@ -1662,30 +1683,9 @@ final class AppDependencies {
         self.developerLanguageService = developerLanguageSvc
 
         // ────────────────────────────────────────────────────────────────────
-        // R-01「三场景共用架构」装配（2026-06-09）
+        // R-01「三场景共用架构」其余装配（2026-06-09）
+        // StarActionService 已在 MCP 之前创建，以下服务继续复用同一实例。
         // ────────────────────────────────────────────────────────────────────
-
-        let registry = StarredRegistry()
-        self.starredRegistry = registry
-
-        // userIDProvider 闭包：从 authSession 取当前用户 id（未登录时 nil）
-        // weak self 不需要 —— closure 只引用 session（已经是 self.authSession 强持），
-        // 但避免 closure 长期持有可能导致的延迟释放，明确 capture session。
-        let starActionSvc = StarActionService(
-            apiClient: api,
-            repoRepository: repo,
-            registry: registry,
-            undoStarHistory: self.undoStarHistoryRepository,
-            userIDProvider: { [weak session] in
-                session?.state.user?.id
-            },
-            userNameProvider: { [weak session] in
-                session?.state.user?.login
-            },
-            homeRefresher: nil,           // HomeView 在 .task 时通过 attachHomeRefresher 挂接
-            activityRepository: self.userRepoActivityRepository
-        )
-        self.starActionService = starActionSvc
 
         // owner 卡片服务：公开 profile 缓存 + 关注动作。无需 AuthSession 双向引用。
         self.ownerFollowService = OwnerFollowService(apiClient: api)

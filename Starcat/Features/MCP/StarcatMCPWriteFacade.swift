@@ -9,16 +9,26 @@
 //    repo_notes 自动创建语义和未来 CloudKit 脏标记；
 //  - 权限检查、dry-run、审计、状态通知和语义索引刷新集中在这里，ToolRegistry 只负责
 //    解析 MCP 参数；
-//  - P0 只写本地用户数据，不触发 GitHub 远端 star/unstar。
+//  - GitHub Star 写入必须复用 `StarActionService`，不能绕过本地缓存、Undo 历史和活动账本。
 //
 
 import Foundation
+
+/// MCP 只依赖 Star 写入的最小边界，生产环境由 `StarActionService` 实现，测试无需访问网络。
+@MainActor
+protocol MCPStarMutationServicing: AnyObject {
+    func star(owner: String, repo: String, displayedStarsCount: Int?) async throws -> Repo
+    func unstar(repo: Repo) async throws
+}
+
+extension StarActionService: MCPStarMutationServicing {}
 
 @MainActor
 final class StarcatMCPWriteFacade {
     private let repoRepository: any RepoRepositoryProtocol
     private let metadataCapability: any RepositoryMetadataCapabilityExecuting
     private let tagCapability: any RepositoryTagMutationCapabilityExecuting
+    private let starMutationService: any MCPStarMutationServicing
     private let settings: AppSettings
     private let entitlementGate: EntitlementGate
     private let auditLog: StarcatMCPAuditLog
@@ -27,6 +37,7 @@ final class StarcatMCPWriteFacade {
         repoRepository: any RepoRepositoryProtocol,
         metadataCapability: any RepositoryMetadataCapabilityExecuting,
         tagCapability: any RepositoryTagMutationCapabilityExecuting,
+        starMutationService: any MCPStarMutationServicing,
         settings: AppSettings,
         entitlementGate: EntitlementGate,
         auditLog: StarcatMCPAuditLog = .shared
@@ -34,9 +45,102 @@ final class StarcatMCPWriteFacade {
         self.repoRepository = repoRepository
         self.metadataCapability = metadataCapability
         self.tagCapability = tagCapability
+        self.starMutationService = starMutationService
         self.settings = settings
         self.entitlementGate = entitlementGate
         self.auditLog = auditLog
+    }
+
+    /// Star 可以直接接收 GitHub 搜索结果中的 owner/name；仓库尚未入库时由
+    /// `StarActionService` 在远端成功后拉取完整 metadata 并写入本地。
+    func starRepo(
+        repoID: Int64?,
+        owner: String?,
+        name: String?,
+        dryRun: Bool
+    ) async throws -> MCPStarWriteResult {
+        let target = try await resolveStarTarget(repoID: repoID, owner: owner, name: name)
+        return try await performGitHubStarWrite(
+            tool: "starcat.star_repo",
+            dryRun: dryRun,
+            repoID: target.existing?.id,
+            targetFullName: target.fullName
+        ) {
+            guard target.existing?.isStarred != true else {
+                return MCPStarWriteResult(
+                    dryRun: dryRun,
+                    changed: false,
+                    action: "star_repo",
+                    targetFullName: target.fullName,
+                    repo: target.existing
+                )
+            }
+            guard !dryRun else {
+                return MCPStarWriteResult(
+                    dryRun: true,
+                    changed: true,
+                    action: "star_repo",
+                    targetFullName: target.fullName,
+                    repo: target.existing
+                )
+            }
+            let starred = try await starMutationService.star(
+                owner: target.owner,
+                repo: target.name,
+                displayedStarsCount: target.existing?.starsCount
+            )
+            return MCPStarWriteResult(
+                dryRun: false,
+                changed: true,
+                action: "star_repo",
+                targetFullName: target.fullName,
+                repo: starred
+            )
+        }
+    }
+
+    /// Unstar 只接受 Starcat 已知仓库，确保远端成功后能沿用现有保留标签、笔记和摘要的语义。
+    func unstarRepo(
+        repoID: Int64?,
+        owner: String?,
+        name: String?,
+        dryRun: Bool
+    ) async throws -> MCPStarWriteResult {
+        let repo = try await resolveRepo(repoID: repoID, owner: owner, name: name)
+        return try await performGitHubStarWrite(
+            tool: "starcat.unstar_repo",
+            dryRun: dryRun,
+            repoID: repo.id,
+            targetFullName: repo.fullName
+        ) {
+            guard repo.isStarred else {
+                return MCPStarWriteResult(
+                    dryRun: dryRun,
+                    changed: false,
+                    action: "unstar_repo",
+                    targetFullName: repo.fullName,
+                    repo: repo
+                )
+            }
+            guard !dryRun else {
+                return MCPStarWriteResult(
+                    dryRun: true,
+                    changed: true,
+                    action: "unstar_repo",
+                    targetFullName: repo.fullName,
+                    repo: repo
+                )
+            }
+            try await starMutationService.unstar(repo: repo)
+            let updated = try await repoRepository.findById(repo.id) ?? repo
+            return MCPStarWriteResult(
+                dryRun: false,
+                changed: true,
+                action: "unstar_repo",
+                targetFullName: repo.fullName,
+                repo: updated
+            )
+        }
     }
 
     func upsertRepoNote(
@@ -272,6 +376,10 @@ final class StarcatMCPWriteFacade {
     /// 共享 Capability 保持与传输层无关；MCP adapter 在唯一出口恢复已发布的错误分类。
     private static func mapCapabilityError(_ error: Error) -> Error {
         switch error {
+        case StarActionError.notAuthenticated:
+            return StarcatMCPError.invalidArguments(
+                "Sign in to GitHub in Starcat before changing repository Stars."
+            )
         case RepositoryMetadataCapabilityError.repositoryNotLocal(let repoID),
              RepositoryTagMutationCapabilityError.repositoryNotLocal(let repoID):
             return StarcatMCPError.notFound("Repo not found: \(repoID)")
@@ -292,6 +400,12 @@ final class StarcatMCPWriteFacade {
         case .localWrite:
             guard settings.mcpAllowLocalWrites else {
                 throw StarcatMCPError.invalidArguments("MCP local writes are disabled in Starcat Settings.")
+            }
+        case .githubStarWrite:
+            guard settings.mcpAllowGitHubStarWrites else {
+                throw StarcatMCPError.invalidArguments(
+                    "MCP GitHub Star writes are disabled in Starcat Settings."
+                )
             }
         case .batchWrite:
             guard settings.mcpAllowLocalWrites, settings.mcpAllowBatchWrites else {
@@ -315,6 +429,70 @@ final class StarcatMCPWriteFacade {
             throw StarcatMCPError.invalidArguments("Provide repo_id or owner + name")
         } catch RepositoryReadCapabilityError.notFound {
             throw StarcatMCPError.notFound("Repo not found: \(selector.displayValue)")
+        }
+    }
+
+    /// `star_repo` 是唯一允许目标尚未存在于本地数据库的写入工具；repo_id 路径仍必须
+    /// 命中本地仓库，owner/name 路径则可直接承接 `global_search_repos` 的 GitHub 结果。
+    private func resolveStarTarget(
+        repoID: Int64?,
+        owner: String?,
+        name: String?
+    ) async throws -> (owner: String, name: String, fullName: String, existing: Repo?) {
+        if repoID != nil {
+            let repo = try await resolveRepo(repoID: repoID, owner: owner, name: name)
+            return (repo.owner, repo.name, repo.fullName, repo)
+        }
+
+        let resolvedOwner = owner?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolvedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !resolvedOwner.isEmpty, !resolvedName.isEmpty else {
+            throw StarcatMCPError.invalidArguments("Provide repo_id or owner + name")
+        }
+        let existing = try await repoRepository.findByOwnerName(owner: resolvedOwner, name: resolvedName)
+        return (resolvedOwner, resolvedName, "\(resolvedOwner)/\(resolvedName)", existing)
+    }
+
+    /// 远端写入与本地写入共享审计格式，但权限必须独立校验。成功时从结果回填 GitHub
+    /// repo ID；失败或 dry-run 仍记录 full name，避免外部搜索目标没有本地行时丢失审计对象。
+    private func performGitHubStarWrite(
+        tool: String,
+        dryRun: Bool,
+        repoID: Int64?,
+        targetFullName: String,
+        operation: () async throws -> MCPStarWriteResult
+    ) async throws -> MCPStarWriteResult {
+        do {
+            try validate(.githubStarWrite)
+            let result = try await operation()
+            await auditLog.record(
+                tool: tool,
+                permission: .githubStarWrite,
+                dryRun: dryRun,
+                success: true,
+                repo: nil,
+                repoID: result.repo?.id ?? repoID,
+                repoFullName: targetFullName,
+                affectedTags: [],
+                warnings: result.warnings,
+                error: nil
+            )
+            return result
+        } catch {
+            let outwardError = Self.mapCapabilityError(error)
+            await auditLog.record(
+                tool: tool,
+                permission: .githubStarWrite,
+                dryRun: dryRun,
+                success: false,
+                repo: nil,
+                repoID: repoID,
+                repoFullName: targetFullName,
+                affectedTags: [],
+                warnings: [],
+                error: outwardError.localizedDescription
+            )
+            throw outwardError
         }
     }
 

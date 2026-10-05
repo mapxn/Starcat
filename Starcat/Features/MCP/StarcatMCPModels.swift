@@ -332,6 +332,7 @@ struct MCPCapabilitiesDTO: Codable, Sendable {
     let statistics_read: Bool
     let global_repository_search: Bool
     let local_writes: Bool
+    let github_star_writes: Bool
     let batch_writes: Bool
     let destructive_writes: Bool
     let ai_summary_generation: Bool

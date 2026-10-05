@@ -359882,6 +359882,40 @@
         }
       }
     },
+    "settings.mcp.githubStarWrites.help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow paired MCP clients to star and unstar repositories on your GitHub account. Disabled by default."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许已配对的 MCP 客户端在您的 GitHub 账户中 Star 或取消 Star 仓库。默认关闭。"
+          }
+        }
+      }
+    },
+    "settings.mcp.githubStarWrites.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow GitHub Star Changes"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许修改 GitHub Stars"
+          }
+        }
+      }
+    },
     "settings.mcp.localAPIKey.help" : {
       "extractionState" : "manual",
       "localizations" : {

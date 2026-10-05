@@ -134,6 +134,7 @@ struct AppSettingsTests {
         )
         settings.mcpServiceEnabled = true
         settings.mcpServicePort = 7777
+        settings.mcpAllowGitHubStarWrites = true
         settings.mcpAllowDestructiveWrites = true
         settings.aiRepoContextMaximumArchiveMB = 90
         settings.setCustomURL("https://example.com", for: .trending)
@@ -170,6 +171,7 @@ struct AppSettingsTests {
         #expect(settings.refreshCurrentContentShortcut == StarcatShortcutCatalog.refreshCurrentContentDefault)
         #expect(settings.mcpServiceEnabled == false)
         #expect(settings.mcpServicePort == AppSettings.defaultMCPServicePort)
+        #expect(settings.mcpAllowGitHubStarWrites == false)
         #expect(settings.mcpAllowDestructiveWrites == false)
         #expect(settings.aiRepoContextMaximumArchiveMB == AppSettings.defaultAIRepoContextMaximumArchiveMB)
         #expect(settings.customServiceURL(for: .trending) == nil)
