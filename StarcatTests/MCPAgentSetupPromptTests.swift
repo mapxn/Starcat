@@ -32,10 +32,11 @@ struct MCPAgentSetupPromptTests {
         #expect(MCPAgentSetupPrompt.cliInstallCommand.hasSuffix("| sh"))
         #expect(MCPAgentSetupPrompt.windowsCLIInstallCommand.contains("releases/latest/download/install.ps1"))
         #expect(MCPAgentSetupPrompt.windowsCLIInstallCommand.hasSuffix("| iex"))
+        #expect(MCPAgentSetupPrompt.cliUpdateCommand == "starcat update")
         #expect(MCPAgentSetupPrompt.cliVerificationCommand == "starcat doctor")
     }
 
-    @Test("CLI Agent prompt 指向公开 Go CLI 仓库")
+    @Test("CLI Agent prompt 先检查并更新已有版本，缺失时才安装")
     func cliAgentPromptUsesPublicRepository() {
         let prompt = MCPAgentSetupPrompt.cliAgentInstall
 
@@ -43,8 +44,21 @@ struct MCPAgentSetupPromptTests {
         #expect(prompt.contains(MCPAgentSetupPrompt.cliRepositoryURL))
         #expect(prompt.contains(MCPAgentSetupPrompt.cliInstallCommand))
         #expect(prompt.contains(MCPAgentSetupPrompt.windowsCLIInstallCommand))
+        #expect(prompt.contains(MCPAgentSetupPrompt.cliUpdateCommand))
+        #expect(prompt.contains("command -v starcat"))
+        #expect(prompt.contains("Get-Command starcat -ErrorAction SilentlyContinue"))
+        #expect(prompt.contains("\"$CLI_PATH\" update"))
+        #expect(prompt.contains("brew upgrade starcat"))
         #expect(prompt.contains("\"$HOME/.local/bin/starcat\" doctor"))
         #expect(!prompt.contains("api.github.com"))
+
+        let discoveryRange = prompt.range(of: "command -v starcat")
+        let installRange = prompt.range(of: MCPAgentSetupPrompt.cliInstallCommand)
+        #expect(discoveryRange != nil)
+        #expect(installRange != nil)
+        if let discoveryRange, let installRange {
+            #expect(discoveryRange.lowerBound < installRange.lowerBound)
+        }
     }
 
     @Test("Claude MCP 配置是显式 stdio JSON 且不包含凭据")

@@ -15,14 +15,18 @@ enum MCPAgentSetupPrompt {
     static let cliRepositoryURL = "https://github.com/starcat-app/starcat-cli"
     static let cliInstallCommand = "curl -fsSL https://github.com/starcat-app/starcat-cli/releases/latest/download/install.sh | sh"
     static let windowsCLIInstallCommand = "irm https://github.com/starcat-app/starcat-cli/releases/latest/download/install.ps1 | iex"
+    // 官方 updater 会自行判断是否存在新版本；Homebrew 安装则明确引导回包管理器升级，
+    // 避免 Agent 通过重复执行安装脚本覆盖已有 CLI。
+    static let cliUpdateCommand = "starcat update"
     static let cliVerificationCommand = "starcat doctor"
 
     static var cliAgentInstall: String {
         String(
-            format: String.l10n("settings.mcp.agentSetup.cliPrompt"),
+            format: String.l10n("settings.mcp.agentSetup.cliLifecyclePrompt"),
             cliRepositoryURL,
             cliInstallCommand,
-            windowsCLIInstallCommand
+            windowsCLIInstallCommand,
+            cliUpdateCommand
         )
     }
 
