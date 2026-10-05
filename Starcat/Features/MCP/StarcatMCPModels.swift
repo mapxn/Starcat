@@ -83,6 +83,17 @@ struct MCPRepoSearchResult: Codable, Sendable {
     let repos: [MCPRepoDTO]
 }
 
+/// 按单个用户标签查询仓库的稳定返回结构。
+///
+/// `total` 表示该标签下全部仍为 Star 的仓库数，`repos` 才受 `limit` 限制，便于
+/// Agent 判断 action queue 是否还有未取回项目。
+struct MCPReposByTagResult: Codable, Sendable {
+    let tag: MCPTagDTO
+    let total: Int
+    let limit: Int
+    let repos: [MCPRepoDTO]
+}
+
 /// 外部启动器使用的全局仓库搜索契约。
 ///
 /// 这里刻意把内部的 `localKeyword` / `RepositoryCandidate` 隐藏起来，只暴露

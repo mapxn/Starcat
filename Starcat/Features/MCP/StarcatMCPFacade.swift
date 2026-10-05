@@ -212,6 +212,26 @@ final class StarcatMCPFacade {
         try await tagRepository.fetchAll().map(MCPTagDTO.init(tag:))
     }
 
+    /// 查询指定标签下仍处于 Star 状态的仓库；排序与 Starcat Tags 视图保持一致。
+    func listReposByTag(tagName: String, limit: Int) async throws -> MCPReposByTagResult {
+        let resolvedName = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !resolvedName.isEmpty else {
+            throw StarcatMCPError.invalidArguments("tag must not be empty")
+        }
+        guard let tag = try await tagRepository.findByName(resolvedName) else {
+            throw StarcatMCPError.notFound("Tag not found: \(resolvedName)")
+        }
+
+        let sanitizedLimit = Self.sanitizeLimit(limit, defaultValue: 20, maxValue: 100)
+        let repositories = try await repoTagRepository.fetchRepos(forTag: tag.id)
+        return MCPReposByTagResult(
+            tag: MCPTagDTO(tag: tag),
+            total: repositories.count,
+            limit: sanitizedLimit,
+            repos: repositories.prefix(sanitizedLimit).map(MCPRepoDTO.init(repo:))
+        )
+    }
+
     func getRepoNote(repoID: Int64?, owner: String?, name: String?) async throws -> MCPRepoNoteDTO? {
         guard settings.mcpExposePrivateNotes else {
             throw StarcatMCPError.privateNotesDisabled

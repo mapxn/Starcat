@@ -45,6 +45,7 @@ final class StarcatMCPToolRegistry {
         "starcat.get_repo_summary",
         "starcat.get_readme",
         "starcat.list_tags",
+        "starcat.list_repos_by_tag",
         "starcat.get_repo_note",
     ]
 
@@ -224,6 +225,21 @@ final class StarcatMCPToolRegistry {
                 title: "List Starcat tags",
                 description: "List all user-defined Starcat tags.",
                 inputSchema: Self.objectSchema([:]),
+                annotations: .init(readOnlyHint: true, openWorldHint: false)
+            ),
+            Tool(
+                name: "starcat.list_repos_by_tag",
+                title: "List repositories by tag",
+                description: "List currently starred repositories assigned to one exact Starcat tag name, ordered the same way as the Tags view.",
+                inputSchema: Self.objectSchema([
+                    "tag": Self.stringSchema("Exact tag name returned by starcat.list_tags."),
+                    "limit": Self.integerSchema(
+                        "Maximum number of repositories to return.",
+                        defaultValue: 20,
+                        minimum: 1,
+                        maximum: 100
+                    )
+                ], required: ["tag"]),
                 annotations: .init(readOnlyHint: true, openWorldHint: false)
             ),
             Tool(
@@ -418,6 +434,16 @@ final class StarcatMCPToolRegistry {
 
             case "starcat.list_tags":
                 let value = try await facade.listTags()
+                return try Self.result(value)
+
+            case "starcat.list_repos_by_tag":
+                guard let tag = params.arguments?["tag"]?.stringValue else {
+                    throw StarcatMCPError.invalidArguments("Missing required argument: tag")
+                }
+                let value = try await facade.listReposByTag(
+                    tagName: tag,
+                    limit: params.arguments?["limit"]?.intValue ?? 20
+                )
                 return try Self.result(value)
 
             case "starcat.get_repo_note":

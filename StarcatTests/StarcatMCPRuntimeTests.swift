@@ -33,7 +33,7 @@ struct StarcatMCPRuntimeTests {
         let list = await runtime.handle(Self.request(id: 2, method: "tools/list"))
         let listJSON = try Self.jsonObject(from: list)
         let tools = try #require((listJSON["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        #expect(tools.count == 22)
+        #expect(tools.count == 23)
         #expect(tools.contains { $0["name"] as? String == "starcat.get_capabilities" })
         #expect(tools.contains { $0["name"] as? String == "starcat.get_overview_statistics" })
         #expect(tools.contains { $0["name"] as? String == "starcat.get_ai_usage_statistics" })
@@ -46,6 +46,7 @@ struct StarcatMCPRuntimeTests {
         #expect(tools.contains { $0["name"] as? String == "starcat.global_search_repos" })
         #expect(tools.contains { $0["name"] as? String == "starcat.star_repo" })
         #expect(tools.contains { $0["name"] as? String == "starcat.unstar_repo" })
+        #expect(tools.contains { $0["name"] as? String == "starcat.list_repos_by_tag" })
         // knowledge.search 当前只完成内部共享 capability；不能在没有独立 MCP 契约评审时
         // 偷偷扩张已发布的公共 tool catalog。
         #expect(tools.contains { $0["name"] as? String == "starcat.search_knowledge" } == false)
@@ -149,6 +150,39 @@ struct StarcatMCPRuntimeTests {
         let starDryRun = try #require(starDryRunResult["structuredContent"] as? [String: Any])
         #expect(starDryRun["target_full_name"] as? String == "github/hub")
         #expect(starDryRun["dry_run"] as? Bool == true)
+
+        let reposByTagCall = await runtime.handle(Self.request(
+            id: 30,
+            method: "tools/call",
+            params: [
+                "name": "starcat.list_repos_by_tag",
+                "arguments": ["tag": "act/test", "limit": 10]
+            ]
+        ))
+        let reposByTagJSON = try Self.jsonObject(from: reposByTagCall)
+        let reposByTagResult = try #require(reposByTagJSON["result"] as? [String: Any])
+        #expect(reposByTagResult["isError"] as? Bool != true)
+        let reposByTag = try #require(reposByTagResult["structuredContent"] as? [String: Any])
+        let matchedTag = try #require(reposByTag["tag"] as? [String: Any])
+        let taggedRepos = try #require(reposByTag["repos"] as? [[String: Any]])
+        #expect(matchedTag["name"] as? String == "act/test")
+        #expect(reposByTag["total"] as? Int == 1)
+        #expect(taggedRepos.first?["full_name"] as? String == "apple/swift")
+
+        let missingTagCall = await runtime.handle(Self.request(
+            id: 31,
+            method: "tools/call",
+            params: [
+                "name": "starcat.list_repos_by_tag",
+                "arguments": ["tag": "act/missing"]
+            ]
+        ))
+        let missingTagJSON = try Self.jsonObject(from: missingTagCall)
+        let missingTagResult = try #require(missingTagJSON["result"] as? [String: Any])
+        #expect(missingTagResult["isError"] as? Bool == true)
+        let missingTagError = try #require(missingTagResult["structuredContent"] as? [String: Any])
+        #expect(missingTagError["code"] as? String == "NOT_FOUND")
+        #expect(missingTagError["message"] as? String == "Tag not found: act/missing")
 
         let contextCall = await runtime.handle(Self.request(
             id: 21,
@@ -273,7 +307,7 @@ struct StarcatMCPRuntimeTests {
         let list = await runtime.handle(Self.request(id: 3, method: "tools/list"))
         let listJSON = try Self.jsonObject(from: list)
         let tools = try #require((listJSON["result"] as? [String: Any])?["tools"] as? [[String: Any]])
-        #expect(tools.count == 22)
+        #expect(tools.count == 23)
     }
 
     @Test("临时 Runtime 只暴露 Agent allowlist 并拒绝越权调用")
@@ -523,6 +557,9 @@ struct StarcatMCPRuntimeTests {
         let repoRepository = GRDBRepoRepository(database: db)
         let tagRepository = GRDBTagRepository(database: db)
         let repoTagRepository = GRDBRepoTagRepository(database: db)
+        let actionTag = Tag.fixture(id: "mcp-act-test", name: "act/test")
+        try await tagRepository.create(actionTag)
+        try await repoTagRepository.addTag(repoId: 1, tagId: actionTag.id)
         let noteRepository = GRDBRepoNoteRepository(database: db)
         try await noteRepository.updateLibraryState(repoId: 2, state: .inLibrary)
         try await db.writer.write { database in
