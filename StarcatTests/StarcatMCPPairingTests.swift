@@ -13,6 +13,21 @@ import Testing
 @Suite("Starcat MCP Pairing")
 @MainActor
 struct StarcatMCPPairingTests {
+    @Test("连接地址区分本机与 Bonjour，缺失名称时保留 TLS 退回本机")
+    func connectionAddresses() {
+        #expect(StarcatMCPService.makeEndpointURL(
+            port: 5555, allowsRemoteConnections: false, localHostName: "starcat-mac"
+        ) == "http://127.0.0.1:5555/mcp")
+        #expect(StarcatMCPService.makeEndpointURL(
+            port: 5555, allowsRemoteConnections: true, localHostName: "starcat-mac"
+        ) == "https://starcat-mac.local:5555/mcp")
+        for missingName in [nil, ""] as [String?] {
+            #expect(StarcatMCPService.makeEndpointURL(
+                port: 5555, allowsRemoteConnections: true, localHostName: missingName
+            ) == "https://127.0.0.1:5555/mcp")
+        }
+    }
+
     @Test("Invitation 包含协议、endpoint、fingerprint 和高熵 secret")
     func invitationContract() throws {
         let store = StarcatMCPDeviceStore()

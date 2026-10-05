@@ -13,6 +13,7 @@
 import Foundation
 import MCP
 import Observation
+import SystemConfiguration
 
 @MainActor
 @Observable
@@ -30,6 +31,9 @@ final class StarcatMCPService {
     private let facade: StarcatMCPFacade
     private let writeFacade: StarcatMCPWriteFacade
     private let notificationService: ReleaseNotificationService?
+    // 固定本次 service 的 Bonjour 名称，确保配对地址和 Host/Origin 白名单一致。
+    // ProcessInfo.hostName 可能是网络提供的公网名称，不能当成本地可解析地址。
+    private let localHostName = SCDynamicStoreCopyLocalHostName(nil) as String?
     private var runtime: StarcatMCPRuntime?
     private var httpServer: StarcatMCPLoopbackHTTPServer?
     private var activeTLSIdentity: StarcatMCPTLSIdentity?
@@ -145,10 +149,28 @@ final class StarcatMCPService {
     }
 
     var endpointURL: String {
-        if settings.mcpAllowRemoteConnections {
-            return "https://\(ProcessInfo.processInfo.hostName):\(settings.mcpServicePort)/mcp"
+        Self.makeEndpointURL(
+            port: settings.mcpServicePort,
+            allowsRemoteConnections: settings.mcpAllowRemoteConnections,
+            localHostName: localHostName
+        )
+    }
+
+    /// 本机连接不依赖 DNS；远程连接使用系统的 Bonjour 名称，缺失时退到本机。
+    /// TLS 由 listener 模式决定，即使地址退到 loopback 也不能降级为 HTTP。
+    static func makeEndpointURL(
+        port: Int,
+        allowsRemoteConnections: Bool,
+        localHostName: String?
+    ) -> String {
+        let scheme = allowsRemoteConnections ? "https" : "http"
+        let host: String
+        if allowsRemoteConnections, let localHostName, !localHostName.isEmpty {
+            host = "\(localHostName).local"
+        } else {
+            host = "127.0.0.1"
         }
-        return "http://127.0.0.1:\(settings.mcpServicePort)/mcp"
+        return "\(scheme)://\(host):\(port)/mcp"
     }
 
     var cliInstallCommand: String {
@@ -392,9 +414,21 @@ final class StarcatMCPService {
         var allowedOrigins = loopbackHosts.map { "\(scheme)://\($0)" }
 
         if allowsRemoteConnections {
-            let remoteHost = "\(ProcessInfo.processInfo.hostName):\(port)"
-            allowedHosts.append(remoteHost)
-            allowedOrigins.append("https://\(remoteHost)")
+            let remoteEndpoint = Self.makeEndpointURL(
+                port: port,
+                allowsRemoteConnections: true,
+                localHostName: localHostName
+            )
+            if let host = URLComponents(string: remoteEndpoint)?.host {
+                let remoteHost = "\(host):\(port)"
+                allowedHosts.append(remoteHost)
+                allowedOrigins.append("https://\(remoteHost)")
+            }
+            // 系统 DNS 名称仍是这台 Mac 的合法访问名；已有远程 profile 可能保存它。
+            // 精确允许该名字，但新配对不再把它当作默认地址。
+            let systemHost = "\(ProcessInfo.processInfo.hostName):\(port)"
+            allowedHosts.append(systemHost)
+            allowedOrigins.append("https://\(systemHost)")
         }
         return OriginValidator(allowedHosts: allowedHosts, allowedOrigins: allowedOrigins)
     }
