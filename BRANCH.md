@@ -33,7 +33,6 @@
 | 分支 | 位置 | 用途 | 当前状态 | 下一步 |
 |---|---|---|---|---|
 | `dev` | 本地 + `origin/dev`；仓库根目录 worktree | 日常开发与功能集成主线。新功能完成验收后先进入这里，再按发布流程进入 `main`。 | `开发中`；1.8.0 发布基线与 `main` 已同步（`892ca01d`）。Direct 1.8.0 已于 2026-09-23 发布（公证、appcast、官网、GitHub Release），App Store 包已就绪待上传。 | App Store 上传由 dong4j 完成；继续承载 1.8.x 维护与下版本开发。 |
-| `codex/laya-mlx-swift-poc` | 本地；Codex managed worktree `~/.codex/worktrees/laya-mlx-swift-poc/Starcat` | 基于 `dev` 抽象可扩展决策引擎，并把 Jev（含 OpenRouter 承载路径）与 Laya Multilingual MLX Swift 作为用户可选实现接入 Labs、分组和标签建议。 | `开发完成，待验收`；代码已在本地分支提交，基线为 `dev@d043f340`，Laya checkpoint Python golden parity、决策路由定向测试、完整单测及 Direct / App Store Debug 构建均通过。 | dong4j 验收后合回 `dev`；未授权前不 push、不删除 worktree。 |
 | `codex/performance-optimization` | 本地；无独立 worktree | Starcat macOS App 的 UI、列表分页、数据加载与缓存性能专项优化。 | `已合并`；多轮优化与交互修复已于 2026-09-06 合入 `dev`，独有提交为 0，原 worktree 已安全删除。 | 暂时保留本地分支；如需删除分支，等待 dong4j 单独授权。 |
 | `main` | 本地 + `origin/main`；仓库根目录 worktree | 远端默认稳定主线和发布基线。 | `长期保留`；1.8.0 已于 2026-09-23 发布：`v1.8.0` tag（`46ec70bc`，其后仅打包脚本修复至 `892ca01d`）、Direct 公证 / appcast / 官网 / GitHub Release 完成；App Store 包已就绪待上传。 | 保持 1.8.0 发布基线；App Store 上传与处理由 dong4j 完成，后续版本继续从已验收的 `dev` 快进。 |
 
@@ -45,6 +44,7 @@
 
 | 分支 | 处理结论 | 清理依据 |
 |---|---|---|
+| `codex/laya-mlx-swift-poc` | 已合并；本地分支与 worktree 保留 | 2026-09-30 以 fast-forward 合入本地 `dev`（HEAD `706f6bff`），`dev` 已包含该提交；未 push，分支/worktree 未清理。 |
 | `feature/anthropic-cc-switch-import` | 已删除 | 2026-09-14 dong4j 确认删除。已以 merge commit（`1341600a`）合入 `dev`，删除前 `merge-base --is-ancestor` 成立、独有提交 0、`git cherry` 为空、diff 为空；`../Starcat-anthropic-cc-switch` worktree 干净后 `git worktree remove`，再 `git branch -d`（HEAD `2ab786f2`）。从未存在远端分支。 |
 | `feature/settings-ui-unify` | 已删除 | 2026-09-14 dong4j 确认删除。已以 merge commit（`a7a4c5c7`）合入 `dev`，删除前 `merge-base --is-ancestor` 成立、独有提交 0、`git cherry` 为空、`../Starcat-settings-ui-unify` worktree 干净后 `git worktree remove`，再 `git branch -d`（HEAD `bb013ab1`）。从未存在远端分支。 |
 | `feature/local-ai` | 已删除 | 2026-09-13 dong4j 确认删除。2026-09-12 已以 merge commit（`84b7e5c5`）合入 `dev`，删除前 `merge-base --is-ancestor` 成立、独有提交 0、`git cherry` 为空、diff 为空；`../Starcat-local-ai` worktree 干净后 `git worktree remove`，再 `git branch -d`（HEAD `d78b6fcb`）。从未存在远端分支。 |
