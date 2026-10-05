@@ -111,6 +111,7 @@ struct MCPAgentSetupPromptTests {
             MCPAgentSetupPrompt.cliAgentInstall,
             MCPAgentSetupPrompt.pairAgent(invitationURI: invitation),
             MCPAgentSetupPrompt.mcpAgentSetup,
+            MCPAgentSetupPrompt.completeAgentSetup(invitationURI: invitation),
         ]
 
         for prompt in prompts {
@@ -134,6 +135,28 @@ struct MCPAgentSetupPromptTests {
         #expect(prompt.split(separator: "\n").count == 1)
         #expect(!prompt.contains("pull --ff-only"))
         #expect(!prompt.contains("starcat --help"))
+    }
+
+    @Test("完整配置 prompt 串联 CLI、配对、MCP、Skill 和只读验收")
+    func completeAgentSetupPromptCoversEveryStage() {
+        let invitation = "starcat-pair://connect?v=1&secret=complete-setup"
+        let prompt = MCPAgentSetupPrompt.completeAgentSetup(invitationURI: invitation)
+
+        #expect(prompt.contains(MCPAgentSetupPrompt.cliRepositoryURL))
+        #expect(prompt.contains(MCPAgentSetupPrompt.cliInstallCommand))
+        #expect(prompt.contains(MCPAgentSetupPrompt.windowsCLIInstallCommand))
+        #expect(prompt.contains(MCPAgentSetupPrompt.cliUpdateCommand))
+        #expect(prompt.contains("starcat pair \"\(invitation)\""))
+        #expect(prompt.contains("codex mcp add starcat"))
+        #expect(prompt.contains("claude mcp add -s user starcat"))
+        #expect(prompt.contains(MCPAgentSetupPrompt.skillRepositoryURL))
+        #expect(prompt.contains("git -C \"$SKILL_PATH\" pull --ff-only"))
+        #expect(prompt.contains("starcat.get_capabilities"))
+        #expect(prompt.contains("starcat.search_repos"))
+        #expect(prompt.contains("limit = 2"))
+        #expect(!prompt.contains("%1$@"))
+        #expect(!prompt.contains("127.0.0.1"))
+        #expect(!prompt.contains("Authorization:"))
     }
 
     @Test("配对命令包含单次 URI 且可直接粘贴执行")

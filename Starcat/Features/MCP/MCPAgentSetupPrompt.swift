@@ -60,6 +60,20 @@ enum MCPAgentSetupPrompt {
         )
     }
 
+    /// 一次性配置提示词必须在复制时注入新的 invitation，不能缓存成静态字符串。
+    /// 提示词只携带五分钟、单次有效的配对命令，不包含 endpoint、Local API Key 或长期设备 token。
+    static func completeAgentSetup(invitationURI: String) -> String {
+        String(
+            format: String.l10n("settings.mcp.agentSetup.complete.prompt"),
+            cliRepositoryURL,
+            cliInstallCommand,
+            windowsCLIInstallCommand,
+            cliUpdateCommand,
+            pairingCommand(invitationURI: invitationURI),
+            skillRepositoryURL
+        )
+    }
+
     static func pairAgent(invitationURI: String) -> String {
         String(
             format: String.l10n("settings.mcp.agentSetup.pairPrompt"),

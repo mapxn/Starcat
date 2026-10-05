@@ -354847,6 +354847,108 @@
         }
       }
     },
+    "settings.mcp.agentSetup.complete.copy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Complete Setup Prompt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制完整配置提示词"
+          }
+        }
+      }
+    },
+    "settings.mcp.agentSetup.complete.footer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Device pairing still requires one confirmation in Starcat. A newly installed MCP server or Skill may require restarting the current AI Agent before it can be loaded."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备配对仍需在 Starcat 中确认一次；新安装的 MCP Server 或 Skill 可能需要重启当前 AI Agent 后才能加载。"
+          }
+        }
+      }
+    },
+    "settings.mcp.agentSetup.complete.help" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask the current AI Agent to check or update the CLI, pair this device, configure MCP, install or update starcat-skill, and perform read-only verification in sequence."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让当前 AI Agent 依次检查或更新 CLI、完成设备配对、配置 MCP、安装或更新 starcat-skill，并执行只读验证。"
+          }
+        }
+      }
+    },
+    "settings.mcp.agentSetup.complete.prompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "# Complete Starcat Setup\n\n## Goal\n\nThe current AI Agent completes the Starcat CLI lifecycle, device pairing, user-level MCP registration, `starcat-skill` installation or update, and read-only verification in that order. Reuse valid existing setup instead of duplicating it, and stop rather than overwriting a conflict.\n\nOfficial CLI repository:\n\n```text\n%1$@\n```\n\nOfficial Skill repository:\n\n```text\n%6$@\n```\n\n## Rules before starting\n\n- Detect the operating system, CPU architecture, and current AI Agent before changing anything.\n- Choose exactly one current Agent path. Supported automatic paths are Codex and Claude Code. If the current Agent cannot be identified or does not expose a known user-level MCP and Skill location, stop and report the unsupported step instead of guessing.\n- Modify only the current user's CLI installation and current Agent's user-level MCP / Skill configuration. Do not modify the open project.\n- Never request a Local API Key, access Starcat's database or credential store directly, or create custom HTTP / JSON-RPC requests.\n- The pairing command below contains a five-minute, single-use invitation. Never print it in the final report, persist it, split it, modify it, or reuse it.\n\n## Stage 1 — Locate, install, or update Starcat CLI\n\n### 1. Locate an existing executable before installing\n\nmacOS / Linux:\n\n```bash\ncommand -v starcat || true\n[ -x \"$HOME/.local/bin/starcat\" ] && echo \"$HOME/.local/bin/starcat\" || true\n```\n\nWindows PowerShell:\n\n```powershell\n(Get-Command starcat -ErrorAction SilentlyContinue).Source\n```\n\nStore the selected absolute path as `CLI_PATH` on macOS/Linux or `$cliPath` on Windows. If multiple installations exist, use the one selected by `command -v` / `Get-Command` and report the duplicate; do not delete either copy.\n\n### 2. Install only when no executable exists\n\nmacOS / Linux:\n\n```bash\n%2$@\n```\n\nWindows PowerShell:\n\n```powershell\n%3$@\n```\n\nAfter installation, locate the executable again. If it is still missing, stop and report the failure.\n\n### 3. Check and update the installed version\n\nRecord the current version, then invoke the official updater through the resolved absolute path. Its PATH form is `%4$@`.\n\nmacOS / Linux:\n\n```bash\n\"$CLI_PATH\" version\n\"$CLI_PATH\" update\n```\n\nWindows PowerShell:\n\n```powershell\n& $cliPath version\n& $cliPath update\n```\n\nIf `starcat update` reports a Homebrew-managed installation, run:\n\n```bash\nbrew update\nbrew upgrade starcat\n```\n\nResolve the executable again and record the final version. For a development build or any network, permission, checksum, or package-manager failure, do not switch installers or overwrite the existing binary; stop this stage and report the exact error.\n\n## Stage 2 — Diagnose and pair only when needed\n\nRun `doctor` through the final absolute CLI path. If it reports a healthy paired device, do not consume the invitation and continue to Stage 3. If it reports missing or rejected pairing credentials, execute this complete command exactly once:\n\n```bash\n%5$@\n```\n\nWait while the user returns to Starcat, checks the device information, and confirms pairing. If the invitation expires, was already used, or the user rejects it, stop and ask the user to copy a fresh complete setup prompt. After successful pairing, run `doctor` again. For any other diagnostic failure, stop and report it rather than attempting unrelated repairs.\n\n## Stage 3 — Configure the current Agent's user-level MCP server\n\nUse the final absolute CLI path as the command, `mcp` as its only argument, `stdio` as the transport, and `starcat` as the server name. Never place the invitation, endpoint, API key, or token in MCP configuration.\n\nFor Codex, inspect first:\n\n```bash\ncodex mcp get starcat\n```\n\nIf no `starcat` server exists, add it:\n\n```bash\ncodex mcp add starcat -- \"$CLI_PATH\" mcp\n```\n\nFor Claude Code, inspect first:\n\n```bash\nclaude mcp get starcat\n```\n\nIf no `starcat` server exists, add it at user scope:\n\n```bash\nclaude mcp add -s user starcat -- \"$CLI_PATH\" mcp\n```\n\nOn Windows, pass `$cliPath` as one command argument instead of the shell literal `$CLI_PATH`. If an existing `starcat` entry already has the same absolute command and the single argument `mcp`, reuse it. If it differs, stop and report the conflicting configuration; do not remove or overwrite it automatically. Do not configure both Agents.\n\n## Stage 4 — Install or update starcat-skill\n\nChoose exactly one user-level destination for the current Agent:\n\n- Codex: `$HOME/.codex/skills/starcat-skill`\n- Claude Code: `$HOME/.claude/skills/starcat-skill`\n\nRecord it as `SKILL_PATH`. If the destination does not exist, create only its parent directory and clone `%6$@` into it. If it exists, verify both of these before updating:\n\n```bash\ngit -C \"$SKILL_PATH\" remote get-url origin\ngit -C \"$SKILL_PATH\" status --porcelain\n```\n\nOnly when it is a clean checkout of the official repository, update it with:\n\n```bash\ngit -C \"$SKILL_PATH\" pull --ff-only\n```\n\nIf the destination has a different origin, uncommitted changes, or cannot fast-forward, stop and report the conflict. Never delete, overwrite, reset, clean, or force-update it. Confirm these files exist: `SKILL.md`, `agents/openai.yaml`, `references/commands.md`, and `references/workflows.md`. Then run the final CLI path with `--help` and confirm that `pair` accepts a complete URI argument, `mcp` exists, and statistics commands are available.\n\n## Stage 5 — Reload and verify without writes\n\nReload the current Agent's MCP and Skill registry if it supports an in-session reload. Otherwise, report that CLI, pairing, MCP configuration, and Skill files are complete but a restart is required; do not claim that MCP or the Skill was discovered in this session.\n\nAfter discovery is actually visible:\n\n1. Invoke `$starcat-skill` for a read-only setup verification.\n2. Run `starcat doctor`.\n3. Verify MCP initialization and `tools/list`.\n4. Call `starcat.get_capabilities`.\n5. Call `starcat.search_repos` once with `query = \"starcat setup verification\"`, `scope = all`, and `limit = 2`.\n6. Do not call any write, dry-run write, destructive, summary-generation, or external-search tool.\n\n## Final report\n\nReport one status for each stage: CLI path and version before/after, pairing, MCP registration, Skill installation/update, Agent reload/discovery, and read-only verification. Identify any stopped stage and the exact safe next action. Never include the invitation URI, pairing command, device token, Local API Key, or credentials."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "# 一次完成 Starcat 全部配置\n\n## 任务目标\n\n当前 AI Agent 按顺序完成 Starcat CLI 生命周期管理、设备配对、用户级 MCP 注册、`starcat-skill` 安装或更新，以及只读验收。已有配置正确时直接复用；遇到冲突时停止，不静默覆盖。\n\nCLI 官方仓库：\n\n```text\n%1$@\n```\n\nSkill 官方仓库：\n\n```text\n%6$@\n```\n\n## 开始前规则\n\n- 修改前先识别操作系统、CPU 架构和当前 AI Agent。\n- 只选择一个当前 Agent 路径。自动流程支持 Codex 和 Claude Code；如果无法识别当前 Agent，或该 Agent 没有明确的用户级 MCP 与 Skill 位置，停止并报告不支持的步骤，不自行猜测。\n- 只修改当前用户的 CLI 安装，以及当前 Agent 的用户级 MCP / Skill 配置；不修改当前打开的项目。\n- 不索取 Local API Key，不直接访问 Starcat 数据库或凭据存储，不自行实现 HTTP / JSON-RPC 请求。\n- 下方配对命令包含五分钟、单次有效的 invitation。禁止在最终报告中打印、持久化、拆分、修改或重复使用它。\n\n## 阶段 1 — 查找、安装或更新 Starcat CLI\n\n### 1. 安装前先查找现有可执行文件\n\nmacOS / Linux：\n\n```bash\ncommand -v starcat || true\n[ -x \"$HOME/.local/bin/starcat\" ] && echo \"$HOME/.local/bin/starcat\" || true\n```\n\nWindows PowerShell：\n\n```powershell\n(Get-Command starcat -ErrorAction SilentlyContinue).Source\n```\n\n把选中的绝对路径记录为 macOS/Linux 的 `CLI_PATH` 或 Windows 的 `$cliPath`。如果存在多份安装，使用 `command -v` / `Get-Command` 选中的路径并报告重复路径；不要删除任何一份。\n\n### 2. 仅在不存在 CLI 时安装\n\nmacOS / Linux：\n\n```bash\n%2$@\n```\n\nWindows PowerShell：\n\n```powershell\n%3$@\n```\n\n安装后重新查找可执行文件。如果仍然不存在，停止并报告安装失败。\n\n### 3. 检查并更新已安装版本\n\n先记录当前版本，再通过解析到的绝对路径调用官方 updater；它的 PATH 形式是 `%4$@`。\n\nmacOS / Linux：\n\n```bash\n\"$CLI_PATH\" version\n\"$CLI_PATH\" update\n```\n\nWindows PowerShell：\n\n```powershell\n& $cliPath version\n& $cliPath update\n```\n\n如果 `starcat update` 报告当前安装由 Homebrew 管理，则执行：\n\n```bash\nbrew update\nbrew upgrade starcat\n```\n\n更新后重新解析可执行文件并记录最终版本。如果是开发版本，或发生网络、权限、校验和、包管理器错误，不要切换安装方式或覆盖现有二进制；停止该阶段并原样报告错误。\n\n## 阶段 2 — 诊断，仅在需要时配对\n\n通过最终 CLI 绝对路径执行 `doctor`。如果设备已正常配对，不消耗 invitation，直接进入阶段 3。如果报告缺少配对凭据或凭据被拒绝，只执行一次下面的完整命令：\n\n```bash\n%5$@\n```\n\n等待用户返回 Starcat，核对设备信息并确认配对。如果 invitation 已过期、已使用或用户拒绝，停止并请用户重新复制一份完整配置提示词。配对成功后再次执行 `doctor`。如果是其他诊断错误，停止并报告，不尝试无关修复。\n\n## 阶段 3 — 配置当前 Agent 的用户级 MCP Server\n\n使用最终 CLI 绝对路径作为 command，`mcp` 作为唯一参数，`stdio` 作为 transport，`starcat` 作为 server name。MCP 配置中禁止写入 invitation、endpoint、API Key 或 token。\n\nCodex 先检查：\n\n```bash\ncodex mcp get starcat\n```\n\n如果不存在 `starcat` server，再添加：\n\n```bash\ncodex mcp add starcat -- \"$CLI_PATH\" mcp\n```\n\nClaude Code 先检查：\n\n```bash\nclaude mcp get starcat\n```\n\n如果不存在 `starcat` server，再按用户级添加：\n\n```bash\nclaude mcp add -s user starcat -- \"$CLI_PATH\" mcp\n```\n\nWindows 使用 `$cliPath` 作为单个 command 参数，不要照抄 shell 字面量 `$CLI_PATH`。如果已有 `starcat` 配置使用相同绝对 command 且唯一参数为 `mcp`，直接复用。如果不同，停止并报告冲突；不要自动删除或覆盖。不要同时配置两个 Agent。\n\n## 阶段 4 — 安装或更新 starcat-skill\n\n只为当前 Agent 选择一个用户级目录：\n\n- Codex：`$HOME/.codex/skills/starcat-skill`\n- Claude Code：`$HOME/.claude/skills/starcat-skill`\n\n将其记录为 `SKILL_PATH`。如果目标不存在，只创建父目录并把 `%6$@` clone 到该目录。如果已经存在，更新前先执行：\n\n```bash\ngit -C \"$SKILL_PATH\" remote get-url origin\ngit -C \"$SKILL_PATH\" status --porcelain\n```\n\n仅当它是官方仓库的 clean checkout 时，才执行：\n\n```bash\ngit -C \"$SKILL_PATH\" pull --ff-only\n```\n\n如果 origin 不同、存在未提交改动或无法 fast-forward，停止并报告冲突。禁止删除、覆盖、reset、clean 或强制更新。确认 `SKILL.md`、`agents/openai.yaml`、`references/commands.md`、`references/workflows.md` 均存在。然后通过最终 CLI 路径执行 `--help`，确认 `pair` 接受完整 URI 参数、`mcp` 可用且统计命令存在。\n\n## 阶段 5 — 重新加载并只读验收\n\n如果当前 Agent 支持会话内重新加载 MCP 和 Skill registry，则执行重新加载；否则报告 CLI、配对、MCP 配置与 Skill 文件均已完成，但还需要重启当前 Agent。未观察到发现结果前，不得声称 MCP 或 Skill 已在当前会话加载。\n\n仅在确认已经发现后：\n\n1. 调用 `$starcat-skill` 执行只读配置验收。\n2. 运行 `starcat doctor`。\n3. 验证 MCP `initialize` 和 `tools/list`。\n4. 调用 `starcat.get_capabilities`。\n5. 调用一次 `starcat.search_repos`，参数为 `query = \"starcat setup verification\"`、`scope = all`、`limit = 2`。\n6. 不调用任何写入、写入 dry-run、破坏性、摘要生成或外部搜索工具。\n\n## 完成后报告\n\n分别报告每个阶段的状态：CLI 路径与检查前后版本、配对、MCP 注册、Skill 安装或更新、Agent 重载/发现、只读验收。指出停止的阶段和唯一安全的下一步。禁止包含 invitation URI、配对命令、device token、Local API Key 或任何凭据。"
+          }
+        }
+      }
+    },
+    "settings.mcp.agentSetup.complete.sectionTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quick Setup"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快速配置"
+          }
+        }
+      }
+    },
+    "settings.mcp.agentSetup.complete.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Complete All Setup"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一次完成全部配置"
+          }
+        }
+      }
+    },
     "settings.mcp.agentSetup.mcp.agent.copy" : {
       "extractionState" : "manual",
       "localizations" : {

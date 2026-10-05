@@ -216,6 +216,12 @@ final class StarcatMCPService {
         MCPAgentSetupPrompt.pairAgent(invitationURI: try createPairingInvitationURI())
     }
 
+    /// 完整配置同样按点击生成独立 invitation；即使用户先复制过单独的配对提示词，
+    /// 两条流程也不会共享或重复消费同一个 secret。
+    func createCompleteAgentSetupInstruction() throws -> String {
+        MCPAgentSetupPrompt.completeAgentSetup(invitationURI: try createPairingInvitationURI())
+    }
+
     /// invitation 只用于兑换逐设备 token，不能直接调用 MCP。
     private func createPairingInvitationURI() throws -> String {
         guard case .running = state else {

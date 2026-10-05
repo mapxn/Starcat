@@ -126,6 +126,29 @@ struct MCPSettingsTab: View {
 
             Section {
                 setupActionRow(
+                    title: "settings.mcp.agentSetup.complete.title",
+                    help: "settings.mcp.agentSetup.complete.help"
+                ) {
+                    pairingCopyButton(
+                        providesContent: { try mcpService.createCompleteAgentSetupInstruction() },
+                        tooltip: "settings.mcp.agentSetup.complete.copy",
+                        isEnabled: isRunning(mcpService.state)
+                    )
+                }
+            } header: {
+                SettingsSectionHeader(
+                    "settings.mcp.agentSetup.complete.sectionTitle",
+                    systemImage: "checklist"
+                )
+            } footer: {
+                Text("settings.mcp.agentSetup.complete.footer")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                setupActionRow(
                     title: "settings.mcp.agentSetup.cli.manual.title",
                     help: "settings.mcp.agentSetup.cli.manual.help"
                 ) {
@@ -400,8 +423,8 @@ struct MCPSettingsTab: View {
         .controlSize(.regular)
     }
 
-    /// 配对命令每次点击即时生成，不能先缓存到 View state。这样用户手工配对与
-    /// Agent 配对永远拿到相互独立、五分钟有效的一次性 secret。
+    /// 携带 invitation 的内容每次点击即时生成，不能先缓存到 View state。这样手工配对、
+    /// Agent 配对与完整配置永远拿到相互独立、五分钟有效的一次性 secret。
     private func pairingCopyButton(
         providesContent: @escaping () throws -> String,
         tooltip: LocalizedStringKey,
