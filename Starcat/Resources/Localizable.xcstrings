@@ -86210,6 +86210,13 @@
         }
       }
     },
+    "batchAI.panel.applyProgressFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Applying tags %1$d / %2$d" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在应用标签 %1$d / %2$d" } }
+      }
+    },
     "batchAI.panel.cancel" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -87385,6 +87392,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部完成"
+          }
+        }
+      }
+    },
+    "batchAI.panel.ignoreReason.emptyTagLibrary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tag generation was skipped because the tag library is empty. Build a tag taxonomy in manual organization first."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签库为空，后台自动整理已跳过标签生成；请先在手动整理中建立标签体系。"
+          }
+        }
+      }
+    },
+    "batchAI.panel.ignoreReason.taxonomyUncovered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The current tag taxonomy did not cover this repository: no confirmed candidate tag matched, so no tag was written."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前标签体系未覆盖：未匹配到你确认的候选标签，因此未写入标签。"
+          }
+        }
+      }
+    },
+    "batchAI.panel.ignoreReason.userSkipped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You ignored this repository's tag suggestions, so no tag was written."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你已忽略本仓库的标签建议，因此未写入标签。"
+          }
+        }
+      }
+    },
+    "batchAI.panel.ignoreReason.vocabularyMiss" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No suitable existing tag matched this repository, so no tag was written."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现有标签库中没有匹配此仓库的合适标签，因此未写入标签。"
           }
         }
       }
@@ -502716,6 +502791,62 @@
             "value" : "标签库为空，将先在本地建立标签体系，无需配置 AI Key。"
           }
         }
+      }
+    },
+    "batchAI.taxonomy.preparing.action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Building taxonomy…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在生成标签体系…" } }
+      }
+    },
+    "batchAI.taxonomy.preparing.analyzing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Analyzing repository signals…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在分析仓库特征…" } }
+      }
+    },
+    "batchAI.taxonomy.preparing.buildingCandidates" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Combining candidate tags…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在整理候选标签…" } }
+      }
+    },
+    "batchAI.taxonomy.preparing.loadingData" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Loading repositories and cached READMEs…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在读取仓库与缓存的 README…" } }
+      }
+    },
+    "batchAI.taxonomy.preparing.local" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Local analysis only. No AI provider or API key is used." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全程仅使用本地分析，不会调用 AI Provider，也无需 API Key。" } }
+      }
+    },
+    "batchAI.taxonomy.preparing.progressFormat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Analyzed %1$d / %2$d repositories" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已分析 %1$d / %2$d 个仓库" } }
+      }
+    },
+    "batchAI.taxonomy.preparing.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Analyze repositories locally and build a reusable tag taxonomy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在本地分析仓库并建立可复用的标签体系" } }
+      }
+    },
+    "batchAI.taxonomy.preparing.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Building your tag taxonomy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在建立标签体系" } }
       }
     },
     "batchAI.taxonomy.signal.description" : {

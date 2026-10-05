@@ -2198,7 +2198,8 @@ struct HomeView: View {
     /// 错误处理：fetchUntagged 失败仅记日志，不弹错——这是用户主动触发的场景，
     /// 失败时按钮仍可继续点（dependencies 状态未变，第二次点击会重试）。
     private func startBatchAIIntegration(
-        context: BatchAIWorkspacePreflightContext
+        context: BatchAIWorkspacePreflightContext,
+        onTaxonomyProgress: @escaping TagTaxonomyBootstrapProgressHandler
     ) async -> BatchAIWorkspaceStartOutcome {
         do {
             try dependencies.entitlementGate.requirePro(
@@ -2231,19 +2232,26 @@ struct HomeView: View {
 
         if context.requiresTaxonomyBootstrap {
             do {
+                onTaxonomyProgress(.loadingLocalData)
                 async let corpusTask = dependencies.repoRepository.fetchAllStarred()
                 async let readmesTask = dependencies.readmeRepository.fetchAllContents()
                 let (corpus, readmes) = try await (corpusTask, readmesTask)
+                try Task.checkCancellation()
                 let analyzer = TagTaxonomyBootstrapAnalyzer()
-                let session = await analyzer.analyze(
+                let session = try await analyzer.analyze(
                     corpusRepositories: corpus,
                     targetRepositories: repositories,
-                    cachedReadmesByRepositoryID: readmes
+                    cachedReadmesByRepositoryID: readmes,
+                    onProgress: { progress in
+                        await onTaxonomyProgress(progress)
+                    }
                 )
                 guard !session.candidates.isEmpty else {
                     return .failed(String.l10n("batchAI.taxonomy.error.noCandidates"))
                 }
                 return .taxonomy(session)
+            } catch is CancellationError {
+                return .cancelled
             } catch {
                 AppLog.ai.error(
                     "[batch-ai] local taxonomy analysis failed: \(error.localizedDescription, privacy: .public)"

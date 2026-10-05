@@ -62,6 +62,8 @@ struct BatchAIOrganizationDraftItem: Codable, Sendable {
     let suggestedTagAvailability: [String: BatchAITagSuggestionAvailability]
     private let tagReviewKind: PersistedBatchTagReviewKind
     private let tagReviewFailureMessage: String?
+    /// 可选字段保证旧版本草稿在没有该 key 时仍能恢复，并由 UI 使用通用兜底文案。
+    let ignoreReason: BatchAIIgnoreReason?
     private let belowThresholdTags: [PersistedBelowThresholdTag]
     let finishedAt: Date?
     let didGenerateSummary: Bool
@@ -97,6 +99,7 @@ struct BatchAIOrganizationDraftItem: Codable, Sendable {
             tagReviewKind = .failed
             tagReviewFailureMessage = failure.localizedMessage
         }
+        self.ignoreReason = job.ignoreReason
         self.belowThresholdTags = job.belowThresholdTags.map {
             PersistedBelowThresholdTag(name: $0.name, confidence: $0.confidence)
         }
@@ -139,6 +142,7 @@ struct BatchAIOrganizationDraftItem: Codable, Sendable {
         case .failed:
             job.tagReviewState = .failed(tagReviewFailureMessage.map { .unknown($0) } ?? .interrupted)
         }
+        job.ignoreReason = ignoreReason
         job.belowThresholdTags = belowThresholdTags.map { ($0.name, $0.confidence) }
         job.finishedAt = status == .processing ? .now : finishedAt
         job.didGenerateSummary = didGenerateSummary

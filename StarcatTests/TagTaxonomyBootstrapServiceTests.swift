@@ -15,14 +15,14 @@ import Testing
 @Suite("Local tag taxonomy bootstrap")
 struct TagTaxonomyBootstrapServiceTests {
     @Test("大语料只保留跨仓库重复候选")
-    func filtersSingleRepositoryTopics() async {
+    func filtersSingleRepositoryTopics() async throws {
         let corpus = (1...41).map { index -> Repo in
             var repo = makeRepo(id: index)
             repo.topics = topicsJSON(index <= 3 ? ["machine-learning"] : ["unique-topic-\(index)"])
             return repo
         }
 
-        let session = await TagTaxonomyBootstrapAnalyzer().analyze(
+        let session = try await TagTaxonomyBootstrapAnalyzer().analyze(
             corpusRepositories: corpus,
             targetRepositories: corpus,
             cachedReadmesByRepositoryID: [:]
@@ -35,14 +35,14 @@ struct TagTaxonomyBootstrapServiceTests {
     }
 
     @Test("缓存 README 只补强受控技术概念")
-    func cachedReadmeAddsControlledConceptEvidence() async {
+    func cachedReadmeAddsControlledConceptEvidence() async throws {
         let corpus = (1...10).map { makeRepo(id: $0) }
         let readmes = [
             corpus[0].id: "# Storage\nA PostgreSQL database toolkit for applications.",
             corpus[1].id: "# Query Layer\nBuild reliable database clients with SQLite."
         ]
 
-        let session = await TagTaxonomyBootstrapAnalyzer().analyze(
+        let session = try await TagTaxonomyBootstrapAnalyzer().analyze(
             corpusRepositories: corpus,
             targetRepositories: corpus,
             cachedReadmesByRepositoryID: readmes
@@ -63,7 +63,7 @@ struct TagTaxonomyBootstrapServiceTests {
         var outsideTarget = makeRepo(id: 3)
         outsideTarget.language = "Swift"
 
-        let session = await TagTaxonomyBootstrapAnalyzer().analyze(
+        let session = try await TagTaxonomyBootstrapAnalyzer().analyze(
             corpusRepositories: [first, second, outsideTarget],
             targetRepositories: [first, second],
             cachedReadmesByRepositoryID: [:]
@@ -84,20 +84,49 @@ struct TagTaxonomyBootstrapServiceTests {
     }
 
     @Test("全部 topic 均为单仓独有时不生成候选")
-    func rejectsOneTagPerRepositoryShape() async {
+    func rejectsOneTagPerRepositoryShape() async throws {
         let corpus = (1...12).map { index -> Repo in
             var repo = makeRepo(id: index)
             repo.topics = topicsJSON(["isolated-concept-\(index)"])
             return repo
         }
 
-        let session = await TagTaxonomyBootstrapAnalyzer().analyze(
+        let session = try await TagTaxonomyBootstrapAnalyzer().analyze(
             corpusRepositories: corpus,
             targetRepositories: corpus,
             cachedReadmesByRepositoryID: [:]
         )
 
         #expect(session.candidates.isEmpty)
+    }
+
+    @Test("逐仓分析回报单调进度并进入候选聚合阶段")
+    func reportsMonotonicPreparationProgress() async throws {
+        let corpus = (1...205).map { index -> Repo in
+            var repo = makeRepo(id: index)
+            repo.language = "Swift"
+            return repo
+        }
+        let recorder = ProgressRecorder()
+
+        _ = try await TagTaxonomyBootstrapAnalyzer().analyze(
+            corpusRepositories: corpus,
+            targetRepositories: corpus,
+            cachedReadmesByRepositoryID: [:],
+            onProgress: { progress in
+                await recorder.record(progress)
+            }
+        )
+
+        let values = await recorder.values
+        let analyzing = values.filter { $0.phase == .analyzingRepositories }
+        #expect(analyzing.first?.completedRepositoryCount == 0)
+        #expect(analyzing.last?.completedRepositoryCount == corpus.count)
+        #expect(analyzing.allSatisfy { $0.totalRepositoryCount == corpus.count })
+        #expect(zip(analyzing, analyzing.dropFirst()).allSatisfy { pair in
+            pair.0.completedRepositoryCount <= pair.1.completedRepositoryCount
+        })
+        #expect(values.last?.phase == .buildingCandidates)
     }
 
     private func makeRepo(id: Int) -> Repo {
@@ -113,5 +142,13 @@ struct TagTaxonomyBootstrapServiceTests {
     private func topicsJSON(_ topics: [String]) -> String {
         let data = try! JSONEncoder().encode(topics)
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+private actor ProgressRecorder {
+    private(set) var values: [TagTaxonomyBootstrapProgress] = []
+
+    func record(_ progress: TagTaxonomyBootstrapProgress) {
+        values.append(progress)
     }
 }

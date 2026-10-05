@@ -30,7 +30,75 @@ enum BatchAIWorkspaceInitialMode {
 enum BatchAIWorkspaceStartOutcome {
     case reviewStarted
     case taxonomy(TagTaxonomyBootstrapSession)
+    case cancelled
     case failed(String?)
+}
+
+/// 首次标签体系的准备页。
+///
+/// 这段本地分析可能需要扫描数千个仓库与 README；必须在用户点击后立即替换预检内容，
+/// 明确告诉用户当前阶段。只有逐仓分析阶段展示确定进度，数据库整批读取与候选聚合继续使用
+/// 系统不确定进度，避免伪造百分比。
+private struct TagTaxonomyBootstrapPreparingView: View {
+    let progress: TagTaxonomyBootstrapProgress
+
+    @Environment(\.starcatInterfaceScale) private var interfaceScale
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "tag.circle")
+                .font(.system(size: 44, weight: .regular))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            Text("batchAI.taxonomy.preparing.title")
+                .font(interfaceScale.font(.panelTitle))
+
+            Text(phaseTitleKey)
+                .font(interfaceScale.font(.body))
+                .foregroundStyle(.secondary)
+
+            if progress.phase == .analyzingRepositories,
+               let total = progress.totalRepositoryCount,
+               total > 0 {
+                ProgressView(
+                    value: Double(progress.completedRepositoryCount),
+                    total: Double(total)
+                )
+                .progressViewStyle(.linear)
+                .frame(width: 360)
+
+                Text(verbatim: String(
+                    format: String.l10n("batchAI.taxonomy.preparing.progressFormat"),
+                    progress.completedRepositoryCount,
+                    total
+                ))
+                .font(interfaceScale.font(.caption))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            } else {
+                ProgressView()
+                    .controlSize(.large)
+            }
+
+            Label("batchAI.taxonomy.preparing.local", systemImage: "lock.shield")
+                .font(interfaceScale.font(.caption))
+                .foregroundStyle(.secondary)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var phaseTitleKey: LocalizedStringKey {
+        switch progress.phase {
+        case .loadingLocalData:
+            "batchAI.taxonomy.preparing.loadingData"
+        case .analyzingRepositories:
+            "batchAI.taxonomy.preparing.analyzing"
+        case .buildingCandidates:
+            "batchAI.taxonomy.preparing.buildingCandidates"
+        }
+    }
 }
 
 struct BatchAIWorkspaceView: View {
@@ -39,12 +107,18 @@ struct BatchAIWorkspaceView: View {
 
     let canPrepareCodeContext: Bool
     let hasUsableExternalSearchProvider: Bool
-    let onStart: (BatchAIWorkspacePreflightContext) async -> BatchAIWorkspaceStartOutcome
+    let onStart: (
+        BatchAIWorkspacePreflightContext,
+        @escaping TagTaxonomyBootstrapProgressHandler
+    ) async -> BatchAIWorkspaceStartOutcome
     let onConfirmTaxonomy: (TagTaxonomyBootstrapSession, [TagTaxonomyCandidate]) async -> String?
     let onClose: () -> Void
 
     @State private var mode: BatchAIWorkspaceInitialMode
     @State private var isStarting = false
+    @State private var startTask: Task<Void, Never>?
+    @State private var startRequestID: UUID?
+    @State private var taxonomyPreparationProgress: TagTaxonomyBootstrapProgress?
     @State private var operationError: String?
     @State private var showDiscardConfirmation = false
     @State private var reviewFilter: BatchAIResultFilter = .actionable
@@ -60,7 +134,10 @@ struct BatchAIWorkspaceView: View {
         options: Binding<BatchAIQueueOptions>,
         canPrepareCodeContext: Bool,
         hasUsableExternalSearchProvider: Bool,
-        onStart: @escaping (BatchAIWorkspacePreflightContext) async -> BatchAIWorkspaceStartOutcome,
+        onStart: @escaping (
+            BatchAIWorkspacePreflightContext,
+            @escaping TagTaxonomyBootstrapProgressHandler
+        ) async -> BatchAIWorkspaceStartOutcome,
         onConfirmTaxonomy: @escaping (
             TagTaxonomyBootstrapSession,
             [TagTaxonomyCandidate]
@@ -106,6 +183,12 @@ struct BatchAIWorkspaceView: View {
         .onAppear(perform: presentPendingExpansionIfNeeded)
         .onChange(of: service.pendingTagExpansionSession) { _, _ in
             presentPendingExpansionIfNeeded()
+        }
+        .onDisappear {
+            // 固定工作区关闭后不再需要首次分析结果；取消还能阻止迟到回调重新写入已销毁窗口状态。
+            startRequestID = nil
+            startTask?.cancel()
+            startTask = nil
         }
     }
 
@@ -154,14 +237,18 @@ struct BatchAIWorkspaceView: View {
     private var content: some View {
         switch mode {
         case .preflight(let context):
-            BatchAIOptionsSheet(
-                pendingCount: context.pendingCount,
-                skippedTaggedCount: context.skippedTaggedCount,
-                options: $options,
-                canPrepareCodeContext: canPrepareCodeContext,
-                hasUsableExternalSearchProvider: hasUsableExternalSearchProvider,
-                requiresTaxonomyBootstrap: context.requiresTaxonomyBootstrap
-            )
+            if let taxonomyPreparationProgress {
+                TagTaxonomyBootstrapPreparingView(progress: taxonomyPreparationProgress)
+            } else {
+                BatchAIOptionsSheet(
+                    pendingCount: context.pendingCount,
+                    skippedTaggedCount: context.skippedTaggedCount,
+                    options: $options,
+                    canPrepareCodeContext: canPrepareCodeContext,
+                    hasUsableExternalSearchProvider: hasUsableExternalSearchProvider,
+                    requiresTaxonomyBootstrap: context.requiresTaxonomyBootstrap
+                )
+            }
         case .taxonomy(let model):
             TagTaxonomyBootstrapView(model: model)
         case .expansion(let model):
@@ -220,6 +307,11 @@ struct BatchAIWorkspaceView: View {
                         .font(interfaceScale.font(.caption))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if isPreparingTaxonomy {
+                        Label("batchAI.taxonomy.preparing.local", systemImage: "lock.shield")
+                            .font(interfaceScale.font(.caption))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     } else if context.requiresTaxonomyBootstrap {
                         Label("batchAI.taxonomy.preflight.local", systemImage: "checkmark.shield")
                             .font(interfaceScale.font(.caption))
@@ -239,13 +331,27 @@ struct BatchAIWorkspaceView: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    Button("general.cancel", action: onClose)
+                    Button("general.cancel") {
+                        if isPreparingTaxonomy {
+                            cancelTaxonomyPreparation()
+                        } else {
+                            onClose()
+                        }
+                    }
                         .keyboardShortcut(.cancelAction)
-                        .disabled(isStarting)
+                        .disabled(isStarting && !isPreparingTaxonomy)
                     Button {
                         start(context)
                     } label: {
-                        Text("batchAI.generateTags.start")
+                        if isPreparingTaxonomy {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("batchAI.taxonomy.preparing.action")
+                            }
+                        } else {
+                            Text("batchAI.generateTags.start")
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
@@ -448,6 +554,7 @@ struct BatchAIWorkspaceView: View {
     }
 
     private var headerSubtitleKey: LocalizedStringKey {
+        if isPreparingTaxonomy { return "batchAI.taxonomy.preparing.subtitle" }
         if case .taxonomy = mode { return "batchAI.taxonomy.subtitle" }
         if case .expansion = mode { return "batchAI.expansion.subtitle" }
         return "batchAI.organizeTags.subtitle.compact"
@@ -522,20 +629,47 @@ struct BatchAIWorkspaceView: View {
 
     private func start(_ context: BatchAIWorkspacePreflightContext) {
         guard !isStarting else { return }
+        let requestID = UUID()
         isStarting = true
+        startRequestID = requestID
+        taxonomyPreparationProgress = context.requiresTaxonomyBootstrap ? .loadingLocalData : nil
         operationError = nil
-        Task {
-            let outcome = await onStart(context)
+        startTask = Task {
+            let outcome = await onStart(context) { progress in
+                // 用户可能已经取消并重新开始；旧任务的迟到进度不能覆盖新一轮窗口状态。
+                guard startRequestID == requestID else { return }
+                taxonomyPreparationProgress = progress
+            }
+            guard startRequestID == requestID, !Task.isCancelled else { return }
             isStarting = false
+            startTask = nil
+            startRequestID = nil
+            taxonomyPreparationProgress = nil
             switch outcome {
             case .reviewStarted:
                 mode = .review
             case .taxonomy(let session):
                 mode = .taxonomy(TagTaxonomyBootstrapReviewModel(session: session))
+            case .cancelled:
+                break
             case .failed(let message):
                 operationError = message
             }
         }
+    }
+
+    private var isPreparingTaxonomy: Bool {
+        isStarting && taxonomyPreparationProgress != nil
+    }
+
+    private func cancelTaxonomyPreparation() {
+        guard isPreparingTaxonomy else { return }
+        startRequestID = nil
+        startTask?.cancel()
+        startTask = nil
+        taxonomyPreparationProgress = nil
+        isStarting = false
+        operationError = nil
     }
 
     private func confirmTaxonomy(_ model: TagTaxonomyBootstrapReviewModel) {

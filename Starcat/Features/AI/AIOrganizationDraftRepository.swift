@@ -45,6 +45,11 @@ protocol AIOrganizationDraftRepositoryProtocol: Sendable {
         repoID: Int64,
         payloadJSON: String
     ) async throws
+    func upsertItems(
+        draftID: UUID,
+        kind: AIOrganizationDraftKind,
+        items: [AIOrganizationDraftItem]
+    ) async throws
     func deleteItems(draftID: UUID, kind: AIOrganizationDraftKind, repoIDs: Set<Int64>) async throws
     func deleteDraft(draftID: UUID, kind: AIOrganizationDraftKind) async throws
 }
@@ -145,31 +150,43 @@ struct GRDBAIOrganizationDraftRepository: AIOrganizationDraftRepositoryProtocol 
         repoID: Int64,
         payloadJSON: String
     ) async throws {
+        try await upsertItems(
+            draftID: draftID,
+            kind: kind,
+            items: [AIOrganizationDraftItem(repoID: repoID, payloadJSON: payloadJSON)]
+        )
+    }
+
+    func upsertItems(
+        draftID: UUID,
+        kind: AIOrganizationDraftKind,
+        items: [AIOrganizationDraftItem]
+    ) async throws {
+        guard !items.isEmpty else { return }
         let now = Date().timeIntervalSince1970
         try await database.writer.write { db in
             // EXISTS 是账号切换屏障：旧账号 Task 即使迟到，新账号库里没有相同 draft id，
-            // 写入会自然 no-op，而不是凭 repo id 创建一条跨账号孤儿记录。
-            try db.execute(
-                sql: """
-                    INSERT INTO ai_organization_draft_items
-                        (draft_id, repo_id, payload_json, updated_at)
-                    SELECT ?, ?, ?, ?
-                    WHERE EXISTS (
-                        SELECT 1 FROM ai_organization_drafts WHERE id = ? AND kind = ?
-                    )
-                    ON CONFLICT(draft_id, repo_id) DO UPDATE SET
-                        payload_json = excluded.payload_json,
-                        updated_at = excluded.updated_at
-                    """,
-                arguments: [
-                    draftID.uuidString,
-                    repoID,
-                    payloadJSON,
-                    now,
-                    draftID.uuidString,
-                    kind.rawValue,
-                ]
-            )
+            // 整批写入会自然 no-op。检查与后续 upsert 位于同一事务，账号库不能在中途切换。
+            let draftExists = try Bool.fetchOne(
+                db,
+                sql: "SELECT EXISTS(SELECT 1 FROM ai_organization_drafts WHERE id = ? AND kind = ?)",
+                arguments: [draftID.uuidString, kind.rawValue]
+            ) ?? false
+            guard draftExists else { return }
+
+            for item in items {
+                try db.execute(
+                    sql: """
+                        INSERT INTO ai_organization_draft_items
+                            (draft_id, repo_id, payload_json, updated_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(draft_id, repo_id) DO UPDATE SET
+                            payload_json = excluded.payload_json,
+                            updated_at = excluded.updated_at
+                        """,
+                    arguments: [draftID.uuidString, item.repoID, item.payloadJSON, now]
+                )
+            }
             try db.execute(
                 sql: """
                     UPDATE ai_organization_drafts

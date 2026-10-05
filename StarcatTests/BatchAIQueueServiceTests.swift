@@ -387,6 +387,7 @@ struct BatchAIQueueServiceTests {
         #expect(pendingSession.suggestionEngine == .llm)
         #expect(pendingSession.candidates.count == 5)
         #expect(service.jobs.allSatisfy { $0.status == .ignored })
+        #expect(service.jobs.allSatisfy { $0.ignoreReason == .vocabularyMiss })
 
         // 待确认增量词表必须随草稿恢复；恢复本身不能重复消费一次 LLM 请求。
         let restoredService = makeService(
@@ -399,6 +400,7 @@ struct BatchAIQueueServiceTests {
         await restoredService.restoreDraftIfNeeded()
         #expect(provider.discoveryBatchSizes == [2])
         #expect(restoredService.pendingTagExpansionSession == pendingSession)
+        #expect(restoredService.jobs.allSatisfy { $0.ignoreReason == .vocabularyMiss })
 
         let restoredSession = try #require(restoredService.pendingTagExpansionSession)
         let error = await restoredService.confirmPendingTagExpansion(
@@ -414,6 +416,7 @@ struct BatchAIQueueServiceTests {
         )])
         #expect(restoredService.pendingTagExpansionSession == nil)
         #expect(restoredService.jobs.allSatisfy { $0.tagReviewState == .pending })
+        #expect(restoredService.jobs.allSatisfy { $0.ignoreReason == nil })
         #expect(restoredService.jobs.allSatisfy { $0.suggestedTags.first?.engine == .jev })
         #expect(try await repoTagRepository.fetchTags(forRepo: first.id).isEmpty)
         #expect(try await repoTagRepository.fetchTags(forRepo: second.id).isEmpty)
@@ -504,6 +507,7 @@ struct BatchAIQueueServiceTests {
         let job = try #require(service.jobs.first)
         #expect(job.status == .ignored)
         #expect(job.tagReviewState == .notRequired)
+        #expect(job.ignoreReason == .belowConfidenceThreshold)
         #expect(job.belowThresholdTags.map(\.name) == ["Swift"])
         #expect(provider.lastBatchInvocationMode == .automatic)
         #expect(provider.lastTagGenerationPolicy == AITagGenerationPolicy(
@@ -622,6 +626,46 @@ struct BatchAIQueueServiceTests {
         #expect(!service.isApplyingSuggestedTags)
         #expect(service.jobs.allSatisfy { $0.tagReviewState == .applied })
         #expect(service.selectedTagReviewRepositoryCount == 0)
+    }
+
+    @Test("批量应用跨越分块边界仍完整落库并只刷新一次")
+    func bulkApplyAcrossChunkBoundary() async throws {
+        let provider = ImmediateBatchAIInsightProvider(suggestions: Self.sampleSuggestions)
+        let database = try InMemoryDatabaseManager()
+        let tagRepository = GRDBTagRepository(database: database)
+        let repoTagRepository = GRDBRepoTagRepository(database: database)
+        let service = makeService(
+            insightProvider: provider,
+            database: database,
+            tagRepository: tagRepository,
+            repoTagRepository: repoTagRepository
+        )
+        let repos = makeRepos(count: 101, startingAt: 2_000)
+        for repo in repos {
+            try await database.insertRepoFixture(
+                id: repo.id,
+                owner: repo.owner,
+                name: repo.name
+            )
+        }
+        var options = BatchAIQueueOptions()
+        options.actions = [.tags]
+
+        #expect(service.start(repos: repos, options: options))
+        await waitUntilStopped(service)
+        service.selectAllTagReviewRepositories()
+
+        var tagsChangedCount = 0
+        service.onTagsChanged = { tagsChangedCount += 1 }
+        await service.applySelectedTagReviewRepositories()
+
+        let associationCount = try await database.writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM repo_tags") ?? -1
+        }
+        #expect(associationCount == 202)
+        #expect(service.jobs.allSatisfy { $0.tagReviewState == .applied })
+        #expect(service.selectedTagReviewRepositoryCount == 0)
+        #expect(tagsChangedCount == 1)
     }
 
     @Test("摘要上下文开关作为本次任务参数传给 Provider")
@@ -893,6 +937,7 @@ struct BatchAIQueueServiceTests {
             updatedAt: now
         ))
         let repo = Self.makeTestRepos(ids: [901])[0]
+        let uncoveredRepo = Self.makeTestRepos(ids: [904])[0]
         let localSuggestion = AITagSuggestion(
             name: "Swift",
             confidence: 0.93,
@@ -901,7 +946,7 @@ struct BatchAIQueueServiceTests {
         )
 
         #expect(await service.startLocalTagReview(
-            repos: [repo],
+            repos: [repo, uncoveredRepo],
             suggestionsByRepoID: [repo.id: [localSuggestion]],
             options: BatchAIQueueOptions()
         ))
@@ -909,10 +954,16 @@ struct BatchAIQueueServiceTests {
         #expect(provider.generationCount == 0)
         #expect(!service.isRunning)
         #expect(service.pendingTagReviewCount == 1)
-        #expect(service.jobs.first?.status == .completed)
-        #expect(service.jobs.first?.tagReviewState == .pending)
-        #expect(service.jobs.first?.suggestedTags.first?.engine == .local)
-        #expect(service.jobs.first?.suggestedTagAvailability[localSuggestion.id] == .existing)
+        let matchedJob = try #require(service.jobs.first { $0.repoId == repo.id })
+        #expect(matchedJob.status == .completed)
+        #expect(matchedJob.tagReviewState == .pending)
+        #expect(matchedJob.ignoreReason == nil)
+        #expect(matchedJob.suggestedTags.first?.engine == .local)
+        #expect(matchedJob.suggestedTagAvailability[localSuggestion.id] == .existing)
+        let uncoveredJob = try #require(service.jobs.first { $0.repoId == uncoveredRepo.id })
+        #expect(uncoveredJob.status == .ignored)
+        #expect(uncoveredJob.tagReviewState == .ignored)
+        #expect(uncoveredJob.ignoreReason == .taxonomyUncovered)
     }
 
     @Test("自动整理在空标签库跳过标签生成")
@@ -931,6 +982,7 @@ struct BatchAIQueueServiceTests {
 
         #expect(provider.generationCount == 0)
         #expect(service.jobs.allSatisfy { $0.status == .ignored })
+        #expect(service.jobs.allSatisfy { $0.ignoreReason == .emptyTagLibrary })
         #expect(service.failedCount == 0)
     }
 
@@ -1018,12 +1070,14 @@ struct BatchAIQueueServiceTests {
         service.ignoreSuggestedTags(repoId: 1)
         service.ignoreSuggestedTags(repoId: 2)
         #expect(service.jobs.allSatisfy { $0.tagReviewState == .ignored })
+        #expect(service.jobs.allSatisfy { $0.ignoreReason == .userSkipped })
 
         service.selectAllReposForBulkAction(filter: .ignored)
         #expect(service.bulkActionRepoIDs == [1, 2])
         await service.applyBulkAction(filter: .ignored)
         #expect(service.bulkActionRepoIDs.isEmpty)
         #expect(service.jobs.allSatisfy { $0.tagReviewState == .pending })
+        #expect(service.jobs.allSatisfy { $0.ignoreReason == nil })
         #expect(service.pendingTagReviewCount == 2)
 
         // 待确认/全部 Tab 不提供批量动作勾选，不会跨语义串集合。

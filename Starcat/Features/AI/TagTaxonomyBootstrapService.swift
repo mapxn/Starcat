@@ -34,6 +34,33 @@ enum TagTaxonomySignalKind: String, CaseIterable, Codable, Hashable, Sendable {
     case llm
 }
 
+/// 首次标签体系生成期间向窗口回报的本地准备进度。
+///
+/// 数据读取阶段无法从 GRDB 获得稳定的逐行进度，因此只展示阶段状态；仓库分析阶段才使用
+/// 确定进度。把两者统一成值类型，可以让 SwiftUI 明确表达当前阶段，而不是继续停在预检页。
+struct TagTaxonomyBootstrapProgress: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case loadingLocalData
+        case analyzingRepositories
+        case buildingCandidates
+    }
+
+    let phase: Phase
+    let completedRepositoryCount: Int
+    let totalRepositoryCount: Int?
+
+    static let loadingLocalData = TagTaxonomyBootstrapProgress(
+        phase: .loadingLocalData,
+        completedRepositoryCount: 0,
+        totalRepositoryCount: nil
+    )
+}
+
+/// 进度最终由窗口级 `@State` 消费，因此回调明确隔离到 MainActor；`@Sendable` 允许分析 actor
+/// 安全地跨隔离域调用，而不把 SwiftUI View 或其它可变引用传进分析器。
+typealias TagTaxonomyBootstrapProgressHandler =
+    @MainActor @Sendable (TagTaxonomyBootstrapProgress) -> Void
+
 struct TagTaxonomyRepositoryMatch: Codable, Equatable, Sendable {
     let repoID: Int64
     let repositoryFullName: String
@@ -208,13 +235,27 @@ actor TagTaxonomyBootstrapAnalyzer {
     func analyze(
         corpusRepositories: [Repo],
         targetRepositories: [Repo],
-        cachedReadmesByRepositoryID: [Int64: String]
-    ) -> TagTaxonomyBootstrapSession {
+        cachedReadmesByRepositoryID: [Int64: String],
+        onProgress: (@Sendable (TagTaxonomyBootstrapProgress) async -> Void)? = nil
+    ) async throws -> TagTaxonomyBootstrapSession {
         let targetIDs = Set(targetRepositories.map(\.id))
         let corpusIDs = Set(corpusRepositories.map(\.id))
         var accumulators: [String: CandidateAccumulator] = [:]
 
-        for repository in corpusRepositories {
+        if let onProgress {
+            await onProgress(TagTaxonomyBootstrapProgress(
+                phase: .analyzingRepositories,
+                completedRepositoryCount: 0,
+                totalRepositoryCount: corpusRepositories.count
+            ))
+        }
+
+        // 最多向 MainActor 回报约 100 次，既让 2,000+ 仓库的进度可见，也避免每处理一仓
+        // 就触发一次 SwiftUI diff。小语料仍逐仓更新，保证短任务不会一直显示 0%。
+        let progressStride = max(1, corpusRepositories.count / 100)
+
+        for (repositoryIndex, repository) in corpusRepositories.enumerated() {
+            try Task.checkCancellation()
             for topic in repository.topicsArray {
                 addStructuredSignal(
                     rawName: topic,
@@ -252,6 +293,26 @@ actor TagTaxonomyBootstrapAnalyzer {
                     accumulators: &accumulators
                 )
             }
+
+            let completedCount = repositoryIndex + 1
+            if let onProgress,
+               completedCount == corpusRepositories.count
+                || completedCount.isMultiple(of: progressStride) {
+                await onProgress(TagTaxonomyBootstrapProgress(
+                    phase: .analyzingRepositories,
+                    completedRepositoryCount: completedCount,
+                    totalRepositoryCount: corpusRepositories.count
+                ))
+            }
+        }
+
+        try Task.checkCancellation()
+        if let onProgress {
+            await onProgress(TagTaxonomyBootstrapProgress(
+                phase: .buildingCandidates,
+                completedRepositoryCount: corpusRepositories.count,
+                totalRepositoryCount: corpusRepositories.count
+            ))
         }
 
         let minimumSupport = Self.minimumRepositorySupport(corpusCount: corpusRepositories.count)
@@ -310,6 +371,8 @@ actor TagTaxonomyBootstrapAnalyzer {
         let preferredDefaults = candidates.filter { $0.targetSupportCount > 0 }
         let defaultCandidates = preferredDefaults.isEmpty ? candidates : preferredDefaults
         let defaultIDs = Set(defaultCandidates.prefix(Self.defaultSelectedCandidateCount).map(\.id))
+
+        try Task.checkCancellation()
 
         return TagTaxonomyBootstrapSession(
             targetRepositories: targetRepositories,

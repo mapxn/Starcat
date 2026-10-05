@@ -9,12 +9,19 @@
 //  - 单测更聚焦：tag 命名冲突 / 合并测试和 repo 打标签测试可分别独立
 //
 //  设计约束：
-//  - `addTag` / `batchAddTag` 用 INSERT OR IGNORE，多次 add 同一对是 no-op（不抛错）
+//  - `addTag` / `batchAddTag` / `batchAddTags` 用 INSERT OR IGNORE，多次 add 同一对是 no-op（不抛错）
 //  - `setTags(repoId:tagIds:)` 是替换式（delete + batch insert），便于 picker"一次提交"
 //  - `fetchRepos(forTag:)` 返回 [Repo]，按 starred_at desc，对接 Sidebar 按标签筛选
 //
 
 import Foundation
+
+/// 一条待写入的仓库标签关联。值类型让批量服务可以先在内存完成去重，再把整个分块交给
+/// Repository 用单事务提交，避免把数千次 `addTag` 放大为数千次 SQLite transaction。
+struct RepoTagAssignment: Hashable, Sendable {
+    let repoId: Int64
+    let tagId: String
+}
 
 protocol RepoTagRepositoryProtocol: Sendable {
 
@@ -35,6 +42,10 @@ protocol RepoTagRepositoryProtocol: Sendable {
     /// 批量给一组 repo 加同一个标签。事务 + INSERT OR IGNORE。
     /// 适合"列表多选 → 批量打标签"用例。
     func batchAddTag(repoIds: [Int64], tagId: String) async throws
+
+    /// 批量写入多仓库、多标签关联；同一分块必须在一个事务内完成。
+    /// 输入允许重复，Repository 负责按 `(repoId, tagId)` 幂等去重。
+    func batchAddTags(assignments: [RepoTagAssignment]) async throws
 
     // MARK: - 查询
 

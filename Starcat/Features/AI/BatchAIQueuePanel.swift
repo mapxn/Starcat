@@ -54,17 +54,17 @@ struct BatchAIQueuePanel: View {
 
     private var progressSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(String(
-                format: String.l10n("githubStarLists.aiGrouping.progressFormat"),
-                service.finishedCount,
-                service.totalCount
-            ))
-            .font(interfaceScale.font(.caption))
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
+            Text(progressSummaryText)
+                .font(interfaceScale.font(.caption))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
             ProgressView(value: progressFraction)
                 .progressViewStyle(.linear)
-                .tint(service.failedCount > 0 ? .orange : .accentColor)
+                .tint(
+                    service.tagApplicationProgress == nil && service.failedCount > 0
+                        ? .orange
+                        : .accentColor
+                )
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -203,8 +203,28 @@ struct BatchAIQueuePanel: View {
     }
 
     private var progressFraction: Double {
+        if let progress = service.tagApplicationProgress {
+            guard progress.totalRepositoryCount > 0 else { return 0 }
+            return Double(progress.processedRepositoryCount)
+                / Double(progress.totalRepositoryCount)
+        }
         guard service.totalCount > 0 else { return 0 }
         return Double(service.finishedCount) / Double(service.totalCount)
+    }
+
+    private var progressSummaryText: String {
+        if let progress = service.tagApplicationProgress {
+            return String(
+                format: String.l10n("batchAI.panel.applyProgressFormat"),
+                progress.processedRepositoryCount,
+                progress.totalRepositoryCount
+            )
+        }
+        return String(
+            format: String.l10n("githubStarLists.aiGrouping.progressFormat"),
+            service.finishedCount,
+            service.totalCount
+        )
     }
 
 }

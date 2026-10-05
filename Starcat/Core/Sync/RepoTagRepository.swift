@@ -77,17 +77,29 @@ struct GRDBRepoTagRepository: RepoTagRepositoryProtocol {
     // MARK: - 批量
 
     func batchAddTag(repoIds: [Int64], tagId: String) async throws {
-        guard !repoIds.isEmpty else { return }
+        try await batchAddTags(assignments: repoIds.map {
+            RepoTagAssignment(repoId: $0, tagId: tagId)
+        })
+    }
+
+    func batchAddTags(assignments: [RepoTagAssignment]) async throws {
+        // 调用方可能因重复建议带来相同关联；先去重不仅减少 SQL，也确保每个仓库只发布一次
+        // 变化通知，避免三个标签把下游 README/RAG/Widget 刷新放大三倍。
+        let uniqueAssignments = Set(assignments).sorted { lhs, rhs in
+            if lhs.repoId != rhs.repoId { return lhs.repoId < rhs.repoId }
+            return lhs.tagId < rhs.tagId
+        }
+        guard !uniqueAssignments.isEmpty else { return }
         let now = ISO8601DateFormatter.shared.string(from: Date())
         try await database.writer.write { db in
-            for repoId in repoIds {
+            for assignment in uniqueAssignments {
                 try db.execute(
                     sql: "INSERT OR IGNORE INTO repo_tags (repo_id, tag_id, created_at) VALUES (?, ?, ?)",
-                    arguments: [repoId, tagId, now]
+                    arguments: [assignment.repoId, assignment.tagId, now]
                 )
             }
         }
-        for repoId in repoIds {
+        for repoId in Set(uniqueAssignments.map(\.repoId)).sorted() {
             postTagsDidChange(repoId: repoId)
         }
     }

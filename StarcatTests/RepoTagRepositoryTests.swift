@@ -4,7 +4,7 @@
 //
 //  GRDBRepoTagRepository 单测（W4 Batch A1）。
 //
-//  覆盖：addTag(+幂等) / removeTag / setTags(替换式) / batchAddTag / fetchTagIds /
+//  覆盖：addTag(+幂等) / removeTag / setTags(替换式) / batchAddTag / batchAddTags / fetchTagIds /
 //  fetchTags(JOIN 排序) / fetchRepos / repoCount / repoCountsByTag
 //
 
@@ -127,6 +127,23 @@ struct RepoTagRepositoryTests {
 
         let count = try await rt.repoCount(forTag: "t-swift")
         #expect(count == 3) // 1+2+3 三条，重复的 2 不会变成 4
+    }
+
+    @Test("batchAddTags: 单事务写入多仓库多标签并去重")
+    func batchAddMultipleTags() async throws {
+        let (rt, tag, db) = try makeRepos()
+        try await seed(repoTag: rt, tag: tag, db: db)
+
+        try await rt.batchAddTags(assignments: [
+            RepoTagAssignment(repoId: 1, tagId: "t-swift"),
+            RepoTagAssignment(repoId: 1, tagId: "t-rust"),
+            RepoTagAssignment(repoId: 2, tagId: "t-ai"),
+            RepoTagAssignment(repoId: 1, tagId: "t-swift"),
+        ])
+
+        #expect(Set(try await rt.fetchTagIds(forRepo: 1)) == ["t-swift", "t-rust"])
+        #expect(try await rt.fetchTagIds(forRepo: 2) == ["t-ai"])
+        #expect(try await rt.fetchTagIds(forRepo: 3).isEmpty)
     }
 
     // MARK: - fetchTags (JOIN 排序)

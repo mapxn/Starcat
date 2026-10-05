@@ -28,7 +28,10 @@ final class BatchAIWorkspaceWindowController: NSWindowController, NSWindowDelega
         initialMode: BatchAIWorkspaceInitialMode,
         options: Binding<BatchAIQueueOptions>,
         hasUsableExternalSearchProvider: Bool,
-        onStart: @escaping (BatchAIWorkspacePreflightContext) async -> BatchAIWorkspaceStartOutcome,
+        onStart: @escaping (
+            BatchAIWorkspacePreflightContext,
+            @escaping TagTaxonomyBootstrapProgressHandler
+        ) async -> BatchAIWorkspaceStartOutcome,
         onConfirmTaxonomy: @escaping (
             TagTaxonomyBootstrapSession,
             [TagTaxonomyCandidate]
