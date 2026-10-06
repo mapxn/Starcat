@@ -12,6 +12,14 @@
 
 import Foundation
 
+/// MCP Server 对外版本的单一来源。
+///
+/// `initialize.serverInfo.version` 与 `starcat.get_capabilities.server_version`
+/// 都必须复用此值，避免客户端在同一会话里观察到互相矛盾的 Server 版本。
+enum StarcatMCPServerMetadata {
+    static let version = "0.5.0"
+}
+
 /// MCP 对外暴露的 repo 摘要。
 struct MCPRepoDTO: Codable, Sendable {
     let id: Int64

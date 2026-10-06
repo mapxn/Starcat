@@ -64,7 +64,7 @@ final class StarcatMCPFacade {
     /// Skill 依赖“能连接就一定能生成摘要”这一隐式假设。
     func getCapabilities() -> MCPCapabilitiesDTO {
         MCPCapabilitiesDTO(
-            server_version: "0.5.0",
+            server_version: StarcatMCPServerMetadata.version,
             loopback_only: !settings.mcpAllowRemoteConnections,
             private_notes_read: settings.mcpExposePrivateNotes,
             statistics_read: true,

@@ -26,6 +26,11 @@ struct StarcatMCPRuntimeTests {
 
         let initialize = await runtime.handle(Self.request(id: 1, method: "initialize", params: Self.initializeParams()))
         #expect(initialize.statusCode == 200)
+        let initializeJSON = try Self.jsonObject(from: initialize)
+        let initializeResult = try #require(initializeJSON["result"] as? [String: Any])
+        let serverInfo = try #require(initializeResult["serverInfo"] as? [String: Any])
+        let initializedServerVersion = try #require(serverInfo["version"] as? String)
+        #expect(initializedServerVersion == StarcatMCPServerMetadata.version)
 
         let initialized = await runtime.handle(Self.notification(method: "notifications/initialized"))
         #expect(initialized.statusCode == 202)
@@ -131,6 +136,9 @@ struct StarcatMCPRuntimeTests {
         let capabilitiesJSON = try Self.jsonObject(from: capabilitiesCall)
         let capabilitiesResult = try #require(capabilitiesJSON["result"] as? [String: Any])
         let capabilities = try #require(capabilitiesResult["structuredContent"] as? [String: Any])
+        let capabilityServerVersion = try #require(capabilities["server_version"] as? String)
+        #expect(capabilityServerVersion == StarcatMCPServerMetadata.version)
+        #expect(capabilityServerVersion == initializedServerVersion)
         #expect(capabilities["private_notes_read"] as? Bool == true)
         #expect(capabilities["statistics_read"] as? Bool == true)
         #expect(capabilities["local_writes"] as? Bool == true)

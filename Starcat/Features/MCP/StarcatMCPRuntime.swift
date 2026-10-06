@@ -86,7 +86,7 @@ final class StarcatMCPRuntime: StarcatMCPHTTPRuntime {
         let transport = StatelessHTTPServerTransport(validationPipeline: validationPipeline)
         let server = Server(
             name: "starcat",
-            version: "0.4.0",
+            version: StarcatMCPServerMetadata.version,
             title: "Starcat",
             instructions: "Use starcat.get_capabilities before multi-step workflows, starcat.get_overview_statistics for common counts, and starcat.get_repo_context for one-repository reads. Write tools are Pro-only, local-data-only, settings-gated, and audited. Use dry_run before destructive writes. Never expose private notes unless the capability is enabled.",
             capabilities: .init(
