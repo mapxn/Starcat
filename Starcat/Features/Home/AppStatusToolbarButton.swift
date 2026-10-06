@@ -97,8 +97,9 @@ struct AppStatusToolbarButton: View {
                     onOpenAbout: { AboutWindowController.show() },
                     onOpenStorage: { openSettings(tab: "storage") },
                     onOpenLocalAI: { openSettings(tab: "ai") },
-                    onOpenLocalAILogs: { model in
-                        LocalAILogWindowSelection.shared.select(model.id)
+                    onOpenLabs: { openSettings(tab: "labs") },
+                    onOpenLocalAILogs: { modelID in
+                        LocalAILogWindowSelection.shared.select(modelID)
                         isPresented = false
                         openWindow(id: LocalAILogWindowSelection.sceneID)
                     }
@@ -261,7 +262,8 @@ private struct AppStatusPanel: View {
     let onOpenAbout: () -> Void
     let onOpenStorage: () -> Void
     let onOpenLocalAI: () -> Void
-    let onOpenLocalAILogs: (LocalAIModelCatalogEntry) -> Void
+    let onOpenLabs: () -> Void
+    let onOpenLocalAILogs: (String) -> Void
 
     @State private var isTaskCancelHovered = false
     @State private var aiUsageSummary = AIUsageSummary.empty
@@ -274,7 +276,11 @@ private struct AppStatusPanel: View {
             header
             overviewGrid
             aiUsageCard
-            LocalAIStatusSection(onOpenSettings: onOpenLocalAI, onOpenLogs: onOpenLocalAILogs)
+            LocalAIStatusSection(
+                onOpenSettings: onOpenLocalAI,
+                onOpenLayaSettings: onOpenLabs,
+                onOpenLogs: onOpenLocalAILogs
+            )
             integrationGrid
             diagnosticsRow
             undoStarRow

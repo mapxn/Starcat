@@ -16,6 +16,7 @@ struct LocalAILogWindowView: View {
     @State private var viewModel = LocalAILogViewModel()
     @State private var selection = LocalAILogWindowSelection.shared
     @State private var manager = LocalAIModelManager.shared
+    @State private var layaManager = LayaDecisionModelManager.shared
     @State private var confirmsClearAll = false
 
     var body: some View {
@@ -55,8 +56,8 @@ struct LocalAILogWindowView: View {
         .onChange(of: selection.revision, initial: true) { _, _ in
             if let id = selection.modelID { viewModel.selectModel(id) }
         }
-        .onChange(of: settings.localAIStatusModels(installedModels: manager.installedModels), initial: true) { _, rows in
-            viewModel.setSelectedModels(rows.map(\.entry))
+        .onChange(of: selectedLogModels, initial: true) { _, models in
+            viewModel.setSelectedModels(models)
         }
         .alert("localai.logs.clearAll.title", isPresented: $confirmsClearAll) {
             Button("common.cancel", role: .cancel) {}
@@ -64,6 +65,18 @@ struct LocalAILogWindowView: View {
         } message: {
             Text("localai.logs.clearAll.message")
         }
+    }
+
+    /// 当前状态面板可见模型始终出现在筛选器里；有历史事件的旧模型由 ViewModel
+    /// 另外合并。读取 Laya manager 是为了让共享存储刷新也能驱动窗口更新。
+    private var selectedLogModels: [String: String] {
+        let rows = settings.localAIStatusModels(installedModels: manager.installedModels)
+        var models = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.entry.displayName) })
+        if settings.decisionEngineEnabled, settings.decisionEngineID == .laya {
+            let descriptor = LayaDecisionModelCatalog.multilingual
+            models[descriptor.id] = layaManager.installedManifest?.displayName ?? descriptor.displayName
+        }
+        return models
     }
 
     private var filters: some View {

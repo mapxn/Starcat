@@ -19,10 +19,17 @@ struct LocalAILogContext: Sendable {
     let revision: String
     let feature: String
 
-    init(modelName: String, feature: String, directory: URL? = nil) {
+    init(
+        modelID explicitModelID: String? = nil,
+        modelName: String,
+        feature: String,
+        directory: URL? = nil
+    ) {
         let entry = LocalAIModelCatalog.entries.first { $0.displayName == modelName }
         requestID = UUID().uuidString
-        modelID = entry?.id ?? modelName
+        // Laya 刻意不进入通用模型目录，因此允许专用 runtime 提供稳定 ID；日志筛选
+        // 不能退化为 displayName，否则模型改名后历史记录会与当前入口断开。
+        modelID = explicitModelID ?? entry?.id ?? modelName
         self.modelName = modelName
         revision = directory?.lastPathComponent.components(separatedBy: "@").dropFirst().joined(separator: "@") ?? ""
         self.feature = feature

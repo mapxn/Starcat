@@ -1253,12 +1253,18 @@ final class AppSettings {
     /// 关闭、所选引擎未注册或当前不可用时，两个业务路由都回退既有 LLM；一旦引擎
     /// 已经开始执行，错误不会触发第二次引擎/LLM 调用。
     var decisionEngineEnabled: Bool {
-        didSet { persistBool(key: Keys.decisionEngineEnabled, value: decisionEngineEnabled) }
+        didSet {
+            persistBool(key: Keys.decisionEngineEnabled, value: decisionEngineEnabled)
+            decisionEngineConfigurationDidChange()
+        }
     }
 
     /// 用户显式选择的决策引擎。默认 Jev，切换只影响后续请求。
     var decisionEngineID: DecisionEngineID {
-        didSet { persist(key: Keys.decisionEngineID, value: decisionEngineID.rawValue) }
+        didSet {
+            persist(key: Keys.decisionEngineID, value: decisionEngineID.rawValue)
+            decisionEngineConfigurationDidChange()
+        }
     }
 
     /// 所选决策引擎接管仓库分组建议生成（默认 false）。

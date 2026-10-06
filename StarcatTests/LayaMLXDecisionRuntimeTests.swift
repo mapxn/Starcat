@@ -3,10 +3,11 @@
 //  StarcatTests
 //
 //  常规单测只验证 Noul prompt 的协议与截断，不加载真实模型或访问网络。
-//  真实 checkpoint 的 Python 黄金对拍由独立 opt-in suite 承担。
-//  执行：TEST_RUNNER_STARCAT_LAYA_MLX_POC=1 \
-//       TEST_RUNNER_STARCAT_LAYA_MLX_MODEL_DIR=/path/to/checkpoint make test \
-//       TEST_ARGS="-only-testing:StarcatTests/LayaMLXCheckpointParityTests"
+//  真实 checkpoint 的 Python 黄金对拍与状态/日志联调由独立 opt-in suite 承担。
+//  已在 Starcat 下载模型时只需打开开关；也可显式传入其它 checkpoint：
+//  TEST_RUNNER_STARCAT_LAYA_MLX_POC=1 \
+//  TEST_RUNNER_STARCAT_LAYA_MLX_MODEL_DIR=/path/to/checkpoint \
+//  make test TEST_ARGS="-only-testing:StarcatTests/LayaMLXCheckpointParityTests"
 //
 
 
@@ -75,9 +76,7 @@ struct LayaMLXDecisionRuntimeTests {
 struct LayaMLXCheckpointParityTests {
     @Test("laya-multilingual-mlx FP16 与 Python 黄金 logits/概率一致")
     func matchesPythonGoldenOutput() async throws {
-        let path = try #require(
-            ProcessInfo.processInfo.environment["STARCAT_LAYA_MLX_MODEL_DIR"]
-        )
+        let directory = try installedModelDirectory()
         // 只统计本次 checkpoint load + inference，避免测试进程此前的 MLX 峰值污染结果。
         Memory.clearCache()
         Memory.peakMemory = 0
@@ -85,7 +84,7 @@ struct LayaMLXCheckpointParityTests {
         let clock = ContinuousClock()
         let loadStart = clock.now
         let runtime = try await LayaMLXDecisionRuntime.load(
-            from: URL(fileURLWithPath: path, isDirectory: true)
+            from: directory
         )
         let loadedAt = clock.now
         Memory.clearCache()
@@ -135,6 +134,42 @@ struct LayaMLXCheckpointParityTests {
                 + "completedActiveMiB=\(mebibytes(completedMemory.activeMemory - startingMemory.activeMemory)) "
                 + "peakMiB=\(mebibytes(completedMemory.peakMemory))"
         )
+    }
+
+    @Test("状态快照与结构化日志覆盖手动加载和卸载")
+    func publishesResidentStateAndLogs() async throws {
+        let directory = try installedModelDirectory()
+        let runtimeStore = LayaDecisionRuntimeStore()
+        let logStore = LocalAILogStore(persistenceEnabled: false)
+
+        try await LocalAILogContext.$store.withValue(logStore) {
+            try await runtimeStore.preload(from: directory)
+            let loaded = await runtimeStore.snapshot()
+            #expect(loaded.model?.phase == .ready)
+            #expect(loaded.model?.directory.standardizedFileURL == directory.standardizedFileURL)
+            #expect(loaded.isMLXInitialized)
+
+            try await runtimeStore.unload(reason: "test")
+            let unloaded = await runtimeStore.snapshot()
+            #expect(unloaded.model?.phase == .unloaded)
+            #expect(unloaded.model?.loadedBytes == 0)
+        }
+
+        let events = await logStore.snapshot().events
+        #expect(events.contains { $0.stage == "model.load.completed" })
+        #expect(events.contains { $0.stage == "model.unloaded" })
+        #expect(events.allSatisfy {
+            $0.modelID == LayaDecisionModelCatalog.multilingual.id
+        })
+    }
+
+    /// 测试宿主带 App Group entitlement，可直接读取 Starcat 已安装模型；显式路径仅用于
+    /// 对拍外部 checkpoint。两种来源都只读，不下载、不删除用户模型。
+    private func installedModelDirectory() throws -> URL {
+        if let path = ProcessInfo.processInfo.environment["STARCAT_LAYA_MLX_MODEL_DIR"] {
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        return try #require(LayaDecisionModelStorage.installedModel()?.directory)
     }
 
     /// 用固定精度输出 MiB，便于在不同机器上比较而不把硬件差异写成测试断言。

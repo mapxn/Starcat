@@ -219,11 +219,12 @@ actor LocalMLXRuntime {
         }
     }
 
-    /// 快照不初始化 Metal；仅打开状态面板不会加载模型或分配 GPU 内存。
-    func snapshot() -> LocalAIRuntimeSnapshot {
+    /// 快照不主动初始化 Metal。Laya 使用独立容器，但共享同一套 MLX 进程级统计；
+    /// 只有它已经初始化 MLX 时，状态面板才通过参数读取全局内存。
+    func snapshot(includeExternallyInitializedMemory: Bool = false) -> LocalAIRuntimeSnapshot {
         var result = LocalAIRuntimeSnapshot(
             models: residents, budgetBytes: budget, queuedCount: queuedCount, notice: notice)
-        if initialized {
+        if initialized || includeExternallyInitializedMemory {
             result.activeBytes = Memory.activeMemory
             result.cacheBytes = Memory.cacheMemory
             result.peakBytes = Memory.peakMemory
@@ -384,15 +385,23 @@ actor LocalMLXRuntime {
         }
     }
 
-    func clearMemoryCache() {
-        if initialized { Memory.clearCache() }
-        LocalAILog.record("memory.cache.cleared", "Reclaimable MLX cache cleared manually.", fields: memoryLogFields())
+    func clearMemoryCache(includeExternallyInitializedMemory: Bool = false) {
+        if initialized || includeExternallyInitializedMemory { Memory.clearCache() }
+        LocalAILog.record(
+            "memory.cache.cleared",
+            "Reclaimable MLX cache cleared manually.",
+            fields: memoryLogFields(
+                includeExternallyInitializedMemory: includeExternallyInitializedMemory
+            )
+        )
     }
 
     /// MLX 统计不是整个进程内存；尚未初始化时不能为了日志触发 Metal 初始化。
-    private func memoryLogFields() -> [String: String] {
+    private func memoryLogFields(
+        includeExternallyInitializedMemory: Bool = false
+    ) -> [String: String] {
         var result = ["budgetBytes": String(budget)]
-        if initialized {
+        if initialized || includeExternallyInitializedMemory {
             result["mlxActiveBytes"] = String(Memory.activeMemory)
             result["mlxCacheBytes"] = String(Memory.cacheMemory)
         }

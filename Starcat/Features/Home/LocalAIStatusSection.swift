@@ -12,43 +12,54 @@ import SwiftUI
 /// 模型状态与释放入口保持在同一分区，让用户区分「卸载内存」与「删除下载文件」。
 struct LocalAIStatusSection: View {
     var onOpenSettings: () -> Void = {}
-    var onOpenLogs: (LocalAIModelCatalogEntry) -> Void = { _ in }
+    var onOpenLayaSettings: () -> Void = {}
+    var onOpenLogs: (String) -> Void = { _ in }
 
     @Environment(AppSettings.self) private var settings
     @Environment(\.locale) private var locale
     @Environment(\.starcatInterfaceScale) private var interfaceScale
     @State private var manager = LocalAIModelManager.shared
+    @State private var layaManager = LayaDecisionModelManager.shared
     @State private var snapshot = LocalAIRuntimeSnapshot()
+    @State private var layaSnapshot = LayaDecisionRuntimeSnapshot()
     @State private var pending: Set<String> = []
     @State private var error: String?
 
     var body: some View {
         let models = settings.localAIStatusModels(installedModels: manager.installedModels)
-        if LocalAIHardwareSupport.isLocalAIAvailable, !models.isEmpty {
+        let showsLaya = settings.decisionEngineEnabled && settings.decisionEngineID == .laya
+        if LocalAIHardwareSupport.isLocalAIAvailable, !models.isEmpty || showsLaya {
             AppStatusGroupCard {
-                statusContent(models)
+                statusContent(models, showsLaya: showsLaya)
             }
             .task {
                 while !Task.isCancelled {
-                    snapshot = await LocalMLXRuntime.shared.snapshot()
+                    await refreshSnapshots()
                     do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 }
             }
         }
     }
 
-    private func statusContent(_ models: [LocalAIStatusModel]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func statusContent(
+        _ models: [LocalAIStatusModel],
+        showsLaya: Bool
+    ) -> some View {
+        let totalQueued = snapshot.queuedCount + layaSnapshot.queuedCount
+        return VStack(alignment: .leading, spacing: 10) {
             header
             metricRow
-            if snapshot.queuedCount > 0 {
-                Text(String(format: String.l10n("toolbar.localai.queued"), snapshot.queuedCount))
+            if totalQueued > 0 {
+                Text(String(format: String.l10n("toolbar.localai.queued"), totalQueued))
                     .font(interfaceScale.font(.captionSmall))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
             ForEach(models) { row in
                 modelRow(row)
+            }
+            if showsLaya {
+                layaModelRow
             }
             Text("toolbar.localai.memoryHelp")
                 .font(interfaceScale.font(.captionSmall))
@@ -80,7 +91,7 @@ struct LocalAIStatusSection: View {
             }
             Spacer(minLength: 8)
             Button(action: {
-                run("all") { await LocalMLXRuntime.shared.unloadAll() }
+                run("all", operation: unloadAllModels)
             }) {
                 HStack(spacing: 4) {
                     Text("toolbar.localai.unloadAll")
@@ -220,19 +231,121 @@ struct LocalAIStatusSection: View {
             .accessibilityLabel("\(String.l10n(actionKey)) \(model.displayName)")
 
             Menu {
-                Button("localai.logs.open") { onOpenLogs(model) }
+                Button("localai.logs.open") { onOpenLogs(model.id) }
                 Divider()
                 Button("toolbar.localai.clearCache") {
-                    run("cache") { await LocalMLXRuntime.shared.clearMemoryCache() }
+                    run("cache", operation: clearMemoryCache)
                 }
                 .disabled(snapshot.cacheBytes == 0 || pending.contains("cache"))
                 Button("toolbar.status.localai.openSettings", action: onOpenSettings)
             } label: {
-                Image(systemName: "ellipsis")
-                    .font(interfaceScale.font(.caption, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
+                Label {
+                    Text("toolbar.status.localai.openSettings")
+                } icon: {
+                    Image(systemName: "ellipsis")
+                }
+                .labelStyle(.iconOnly)
+                .font(interfaceScale.font(.caption, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22, height: 22)
+            .focusEffectDisabled()
+        }
+    }
+
+    /// Laya 使用独立 runtime 与磁盘目录，但在状态面板中遵循和普通模型相同的
+    /// “已下载 ≠ 已加载”语义以及加载、卸载、日志和设置入口。
+    private var layaModelRow: some View {
+        let descriptor = LayaDecisionModelCatalog.multilingual
+        let installedDirectory = layaManager.installedDirectoryURL?.standardizedFileURL
+        let resident = layaSnapshot.model.flatMap { model in
+            model.directory.standardizedFileURL == installedDirectory ? model : nil
+        }
+        let phase = resident?.phase ?? .notLoaded
+        let canUnload = [.ready, .running, .loading].contains(phase)
+        let actionKey = canUnload ? "toolbar.localai.unload" : "toolbar.localai.load"
+        return HStack(spacing: 8) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(interfaceScale.font(.iconMedium, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: descriptor.displayName)
+                    .font(interfaceScale.font(.caption, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(descriptor.displayName)
+                usageChips([.decision])
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(phaseDotColor(phase, installed: installedDirectory != nil))
+                        .frame(width: 6, height: 6)
+                    Text(LocalizedStringKey(
+                        installedDirectory == nil
+                            ? "toolbar.localai.notDownloaded"
+                            : phase.localizationKey
+                    ))
+                    if let resident, resident.loadedBytes > 0 {
+                        Text(String(
+                            format: String.l10n("toolbar.localai.loadedMemory"),
+                            format(resident.loadedBytes)
+                        ))
+                        .monospacedDigit()
+                    }
+                }
+                .font(interfaceScale.font(.captionSmall))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                if let message = resident?.error, phase == .failed {
+                    Text(verbatim: message)
+                        .font(interfaceScale.font(.captionSmall))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .help(message)
+                }
+            }
+            Spacer(minLength: 0)
+            Button(LocalizedStringKey(actionKey)) {
+                run(descriptor.id) {
+                    if canUnload {
+                        try await layaManager.unloadFromMemory()
+                    } else {
+                        try await layaManager.loadIntoMemory()
+                    }
+                }
+            }
+            .controlSize(.small)
+            .disabled(
+                installedDirectory == nil
+                    || (pending.contains(descriptor.id) && !canUnload)
+                    || pending.contains("all")
+                    || phase == .unloading
+            )
+            .accessibilityLabel("\(String.l10n(actionKey)) \(descriptor.displayName)")
+
+            Menu {
+                Button("localai.logs.open") { onOpenLogs(descriptor.id) }
+                Divider()
+                Button("toolbar.localai.clearCache") {
+                    run("cache", operation: clearMemoryCache)
+                }
+                .disabled(snapshot.cacheBytes == 0 || pending.contains("cache"))
+                Button("toolbar.status.localai.openSettings", action: onOpenLayaSettings)
+            } label: {
+                Label {
+                    Text("toolbar.status.localai.openSettings")
+                } icon: {
+                    Image(systemName: "ellipsis")
+                }
+                .labelStyle(.iconOnly)
+                .font(interfaceScale.font(.caption, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -259,6 +372,7 @@ struct LocalAIStatusSection: View {
 
     private var hasResidentModels: Bool {
         snapshot.models.values.contains { [.loading, .ready, .running].contains($0.phase) }
+            || layaSnapshot.model.map { [.loading, .ready, .running].contains($0.phase) } == true
     }
 
     /// 有模型驻留或正在加载时显示「已启动」，对应原型里的绿点。
@@ -309,7 +423,32 @@ struct LocalAIStatusSection: View {
         case .task(.embedding): return "ai.task.embedding"
         case .task(.translation): return "ai.task.translation"
         case .rerank: return "rag.workspace.rerank.title"
+        case .decision: return "settings.labs.decision.section"
         }
+    }
+
+    private func unloadAllModels() async throws {
+        await LocalMLXRuntime.shared.unloadAll()
+        // 快照最多落后一次轮询；无条件请求 Laya 卸载，避免它刚加载完成却被“全部卸载”漏掉。
+        // runtime 的空状态卸载是 no-op，不会触碰已下载文件。
+        try await layaManager.unloadFromMemory(reason: "unload_all")
+    }
+
+    private func clearMemoryCache() async {
+        await LocalMLXRuntime.shared.clearMemoryCache(
+            includeExternallyInitializedMemory: layaSnapshot.isMLXInitialized
+        )
+    }
+
+    /// 先读 Laya 是否已初始化 MLX，再读取进程级 Memory；两套 runtime 共享同一组
+    /// 统计，不能相加，否则同时驻留时会把内存重复计算两次。
+    private func refreshSnapshots() async {
+        let latestLaya = await LayaDecisionRuntimeStore.shared.snapshot()
+        let latestLocal = await LocalMLXRuntime.shared.snapshot(
+            includeExternallyInitializedMemory: latestLaya.isMLXInitialized
+        )
+        layaSnapshot = latestLaya
+        snapshot = latestLocal
     }
 
     /// 操作独立于面板的采样 task；关闭 popover 不应让手动卸载中途被取消。
@@ -321,7 +460,7 @@ struct LocalAIStatusSection: View {
             do { try await operation() } catch is CancellationError {} catch {
                 self.error = error.localizedDescription
             }
-            snapshot = await LocalMLXRuntime.shared.snapshot()
+            await refreshSnapshots()
         }
     }
 

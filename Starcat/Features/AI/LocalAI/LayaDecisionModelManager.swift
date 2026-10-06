@@ -95,6 +95,29 @@ final class LayaDecisionModelManager {
         }
     }
 
+    /// 状态面板只请求内存加载，不改变磁盘安装清单，也不触发重新下载。
+    func loadIntoMemory() async throws {
+        guard let directory = installedDirectoryURL else {
+            throw LocalAIError.modelNotInstalled(
+                LayaDecisionModelCatalog.multilingual.displayName
+            )
+        }
+        installState = .loading
+        do {
+            try await runtimeStore.preload(from: directory)
+            installState = .installed
+        } catch {
+            installState = .loadFailed(message: error.localizedDescription)
+            throw error
+        }
+    }
+
+    /// 只释放当前进程中的 runtime；模型文件仍保留，稍后可从状态面板重新加载。
+    func unloadFromMemory(reason: String = "manual") async throws {
+        try await runtimeStore.unload(reason: reason)
+        if installedDirectoryURL != nil { installState = .installed }
+    }
+
     func delete() {
         pause()
         guard let directory = installedDirectoryURL else { return }

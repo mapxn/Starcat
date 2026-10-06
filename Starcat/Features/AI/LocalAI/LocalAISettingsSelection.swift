@@ -20,6 +20,7 @@ struct LocalAIStatusModel: Identifiable, Equatable, Sendable {
 enum LocalAIStatusUsage: Equatable, Hashable, Sendable {
     case task(AIModelTask)
     case rerank
+    case decision
 }
 
 extension AppSettings {

@@ -59,7 +59,9 @@ struct LocalAILogViewModelTests {
     @Test("Model menu only contains selected or logged models and preserves a scoped empty filter")
     func selectedAndLoggedModelsOnly() {
         let vm = LocalAILogViewModel(store: .init(persistenceEnabled: false))
-        vm.setSelectedModels([LocalAIModelCatalog.llmMiniCPM5])
+        vm.setSelectedModels([
+            LocalAIModelCatalog.llmMiniCPM5.id: LocalAIModelCatalog.llmMiniCPM5.displayName
+        ])
         vm.selectModel(LocalAIModelCatalog.llmMiniCPM5.id)
         #expect(Set(vm.models.keys) == [LocalAIModelCatalog.llmMiniCPM5.id])
         let qwen = event(1, model: LocalAIModelCatalog.llmLite)
@@ -71,6 +73,30 @@ struct LocalAILogViewModelTests {
         #expect(vm.rows == [qwen])
         vm.search = "not present"
         #expect(vm.rows.isEmpty)
+    }
+
+    @Test("A selected Laya model keeps its stable filter identity without joining the generic catalog")
+    func layaModelIdentity() {
+        let descriptor = LayaDecisionModelCatalog.multilingual
+        let vm = LocalAILogViewModel(store: .init(persistenceEnabled: false))
+        vm.setSelectedModels([descriptor.id: descriptor.displayName])
+        vm.selectModel(descriptor.id)
+
+        var event = LocalAILogEvent(
+            stage: "inference.completed",
+            message: "Laya decision inference completed.",
+            context: .init(
+                modelID: descriptor.id,
+                modelName: descriptor.displayName,
+                feature: "decision"
+            )
+        )
+        event.sequence = 1
+        vm.receive(.init(events: [event], revision: 1, lastSequence: 1))
+
+        #expect(event.modelID == descriptor.id)
+        #expect(vm.models[descriptor.id] == descriptor.displayName)
+        #expect(vm.rows == [event])
     }
 
     @Test("Reading older lines does not mark new records as seen")

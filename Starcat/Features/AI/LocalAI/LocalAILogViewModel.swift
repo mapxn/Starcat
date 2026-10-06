@@ -60,8 +60,10 @@ final class LocalAILogViewModel {
         rebuild()
     }
 
-    func setSelectedModels(_ entries: [LocalAIModelCatalogEntry]) {
-        selectedModels = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.displayName) })
+    /// 日志窗口接收稳定 ID 到显示名的轻量映射；Laya 刻意不属于通用模型目录，
+    /// 因此这里不能再把筛选来源限制为 `LocalAIModelCatalogEntry`。
+    func setSelectedModels(_ models: [String: String]) {
+        selectedModels = models
         rebuild()
     }
 
@@ -128,8 +130,12 @@ final class LocalAILogViewModel {
             if let id = event.modelID, let name = event.modelName { models[id] = name }
         }
         // 从某个模型入口打开后即使刚好清空日志，也保留它的筛选，不切换成全模型。
-        if let modelID, models[modelID] == nil, let entry = LocalAIModelCatalog.entry(id: modelID) {
-            models[modelID] = entry.displayName
+        if let modelID, models[modelID] == nil {
+            if let entry = LocalAIModelCatalog.entry(id: modelID) {
+                models[modelID] = entry.displayName
+            } else if modelID == LayaDecisionModelCatalog.multilingual.id {
+                models[modelID] = LayaDecisionModelCatalog.multilingual.displayName
+            }
         }
         rows = displayed.filter(matches)
         if followsTail && !isPaused { markSeen() }
