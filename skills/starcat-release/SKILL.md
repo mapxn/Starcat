@@ -12,7 +12,7 @@ archive 与 Direct 公开发布两条；不要把 legacy 内测 DMG 流程或通
 ## 硬性规则
 
 - 始终用中文回复，并遵守仓库 `AGENTS.md`：先给方案并征求 dong4j 明确确认，再修改文件或运行有副作用的发版命令。
-- 除非用户在当前对话中明确说“开干 / 执行 / 发布 / GO / 动手”，否则不要运行真实发布、部署、上传、`git tag`、`git push`、`rsync`、`ssh`、notarization 或 appcast 写入命令。
+- 修改脚本或 skill 的“开干 / 改吧”只授权对应文件修改；真实打包、公证、tag、push、GitHub Release、官网/appcast 上传仍须当前消息明确授权执行对应发布动作。
 - 排查时先使用只读命令：`git status`、`git tag`、`git ls-remote`、`--help`、读取文件，以及脚本 dry-run 模式。
 - 不要为了发版手动修改 `project.yml` 里的版本号字段。Starcat 的版本来自 git tag 和构建脚本。
 - Starcat 已发布正式版；修改发版代码时保留线上用户、已发布 tag 和历史产物，不覆盖或复用既有版本。代码层废弃路径仍应一次性收口，不堆叠永久双轨。
@@ -77,12 +77,16 @@ Direct 分发使用 `scripts/release-direct.sh <X.Y.Z>`。它会执行：
 
 1. 分支和干净工作区检查；
 2. 创建并推送 tag；
-3. 部署 nginx 配置；
-4. 生成官网 changelog 并部署静态页面；
-5. 带 `STARCAT_GENERATE_APPCAST=1` 调用 `package-direct.sh`；
-6. 上传 DMG/SHA；
-7. 合并并上传 appcast；
-8. 校验线上 URL。
+3. 带 `STARCAT_GENERATE_APPCAST=1` 调用 `package-direct.sh`，完成公证、staple、SHA256 和当前版本 appcast；
+4. 校验本地产物并合并本地 appcast 历史版本；
+5. 本机 `gh` 创建 GitHub Release 草稿，上传 DMG/SHA256，回读附件核验 SHA256 后公开；
+6. 生成并部署官网 changelog、静态页和 nginx；
+7. 确认 GitHub 下载可用后，仅向官网上传 appcast；
+8. 校验官网 appcast、GitHub DMG 和 changelog。
+
+DMG/SHA256 不再上传阿里云。appcast 继续由 `https://starcat.ink/appcast.xml` 提供，
+官网和旧客户端共用该地址。生成清单无需等待附件上线，公开清单必须在附件验证之后。
+GitHub 操作已由脚本调用 `publish-direct-github-release.py` 集成，不再安排发布后的第二次手工上传。
 
 正式公开发布命令：
 
@@ -111,6 +115,18 @@ STARCAT_RELEASE_SKIP_SITE=1 \
 ./scripts/release-direct.sh X.Y.Z
 ```
 
+### GitHub 上传失败后续跑
+
+保留最终 DMG、SHA256 和 `appcast-current.xml`，使用：
+
+```bash
+STARCAT_NOTARIZE=1 STARCAT_RELEASE_SKIP_TAG=1 STARCAT_RELEASE_REUSE_ARTIFACTS=1 \
+./scripts/release-direct.sh X.Y.Z
+```
+
+草稿只补缺失附件；已有附件必须下载核验与本地一致，不允许 `--clobber`。
+已公开且一致的 Release 只验证；冲突或缺失附件时停止。此路径不重新打包或 staple。
+
 ### 同步 Homebrew Cask
 
 Direct 正式发布成功后，继续处理独立仓库
@@ -118,8 +134,8 @@ Direct 正式发布成功后，继续处理独立仓库
 
 1. 从 `dist/direct/downloads/Starcat-<version>-arm64.dmg.sha256` 读取 SHA256，
    并对正式 DMG 实际计算一次 SHA256；两者必须一致。
-2. 更新 Cask 的 `version` 和 `sha256`，URL 继续使用版本化
-   `Starcat-#{version}-arm64.dmg`。
+2. 更新 Cask 的 `version` 和 `sha256`，URL 使用 GitHub Release 的版本化
+   `https://github.com/starcat-app/Starcat/releases/download/v#{version}/Starcat-#{version}-arm64.dmg`。
 3. 在 `supports/homebrew-starcat` 独立仓库运行：
 
 ```bash
@@ -159,7 +175,7 @@ Direct 发布后验证：
 - 合并后的 appcast 存在：`supports/starcat-site/direct/appcast.xml`，且引用新 DMG 和新版本号；
 - 线上 URL 可访问：
   - `https://starcat.ink/appcast.xml`
-  - `https://starcat.ink/downloads/Starcat-<version>-arm64.dmg`
+  - `https://github.com/starcat-app/Starcat/releases/download/v<version>/Starcat-<version>-arm64.dmg`
   - `https://starcat.ink/changelog.html`
 - `supports/homebrew-starcat` 的 `origin/main` 已声明相同版本和 DMG SHA256；
 - `homebrew-starcat` 的 `Audit Cask` Action 成功。

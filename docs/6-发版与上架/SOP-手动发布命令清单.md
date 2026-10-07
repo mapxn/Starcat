@@ -113,21 +113,13 @@ cat /Users/dong4j/Developer/1.AI/ai-incubator/Starcat/dist/direct/downloads/Star
 # 查看当前 Direct appcast。
 cat /Users/dong4j/Developer/1.AI/ai-incubator/Starcat/supports/starcat-site/direct/appcast.xml
 
-# Direct 正式发布完成后检查本机 GitHub CLI 和目标 Release。
-gh auth status
-gh release view v1.0.0
+# GitHub Release 已由 release-direct.sh 集成；DMG/SHA256 只上传 GitHub。
+# 本地生成 appcast → GitHub 草稿上传/回读 SHA256 核验/公开 → 官网 appcast 上传。
+# 上传失败后保留最终产物续跑，不重新打包、签名或 staple。
+STARCAT_NOTARIZE=1 STARCAT_RELEASE_SKIP_TAG=1 STARCAT_RELEASE_REUSE_ARTIFACTS=1 ./scripts/release-direct.sh 1.0.0
 
-# 从 Direct 英文 Changelog 提取目标版本内容到临时文件后，本机创建 GitHub Release。
-# 不使用 GitHub Actions；不要对已存在资产默认使用 --clobber。
-gh release create v1.0.0 \
-  dist/direct/downloads/Starcat-1.0.0-arm64.dmg \
-  dist/direct/downloads/Starcat-1.0.0-arm64.dmg.sha256 \
-  --verify-tag \
-  --title "Starcat 1.0.0" \
-  --notes-file "<临时发布说明文件>"
-
-# 验证 GitHub Release 状态与资产。
-gh release view v1.0.0 \
+# 验证 GitHub Release 状态与资产；不再二次手工创建 Release。
+gh release view v1.0.0 --repo starcat-app/Starcat \
   --json tagName,name,isDraft,isPrerelease,url,assets
 ```
 

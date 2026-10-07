@@ -3,7 +3,7 @@
 # release-direct.sh — Starcat Direct 渠道一键发布脚本。
 #
 # 用途：
-#   从 git tag 到官网部署、Direct DMG 打包、Sparkle appcast 上传和线上校验，
+#   从 git tag 到 Direct 打包、GitHub Release、官网 appcast 上传和线上校验，
 #   串联一次 Direct 渠道发布所需的人工步骤。
 #
 # 设计约束：
@@ -26,13 +26,13 @@ Starcat Direct 一键发布脚本
 
 示例:
   # 完整发布 1.0.0：检查 main/干净工作区，创建并推送 v1.0.0 tag，
-  # 部署 nginx 和官网，打包 Direct DMG，上传 appcast/DMG/SHA256 并校验线上 URL。
+  # 打包 Direct DMG，生成 appcast，发布 GitHub 附件后更新官网和 appcast。
   STARCAT_NOTARIZE=1 ./scripts/release-direct.sh 1.0.0
 
   # 演练完整流程，不创建 tag、不推送、不上传、不部署、不做线上校验。
   STARCAT_RELEASE_DRY_RUN=1 ./scripts/release-direct.sh 1.0.0
 
-  # tag 已经存在且已推送，只重跑官网部署、打包、上传和校验。
+  # tag 已经存在且已推送，重跑发布；上传失败重试时另加 STARCAT_RELEASE_REUSE_ARTIFACTS=1。
   STARCAT_RELEASE_SKIP_TAG=1 ./scripts/release-direct.sh 1.0.0
 
   # 只重跑 Direct 更新文件发布，跳过 tag、nginx 和官网静态页部署。
@@ -48,12 +48,12 @@ Starcat Direct 一键发布脚本
   4. 确认 tag v<version> 不存在
   5. 创建 annotated tag
   6. 推送 tag 到 origin
-  7. 生成 supports/starcat-site/direct/changelog.html
-  8. 部署 supports/starcat-site/direct/starcat.ink.conf 并 reload nginx
-  9. 部署官网静态页
- 10. 调用 scripts/package-direct.sh <version> 打包 Direct DMG 并生成 appcast
- 11. 上传 appcast.xml、DMG、SHA256
- 12. 校验线上 appcast、DMG、changelog 可访问
+  7. 调用 package-direct.sh 打包、公证并生成当前版本 appcast
+  8. 校验本地产物，合并本地 appcast 历史版本
+  9. 上传 GitHub Release 草稿附件，下载校验 SHA256 后公开 Release
+ 10. 生成并部署官网 changelog / 静态页 / nginx
+ 11. 确认 GitHub 下载可用后，只向官网上传 appcast.xml
+ 12. 校验线上 appcast、GitHub DMG、changelog 可访问
 
 环境变量:
   STARCAT_NOTARIZE=1
@@ -87,8 +87,13 @@ Starcat Direct 一键发布脚本
   STARCAT_SITE_ROOT=/path/to/starcat-site
       独立官网仓库路径，默认使用主仓库下的 supports/starcat-site。
 
-  STARCAT_DOWNLOAD_BASE_URL=https://starcat.ink/downloads/
-      appcast 中使用的 DMG 下载前缀。
+  STARCAT_DOWNLOAD_BASE_URL=https://github.com/starcat-app/Starcat/releases/download/v<version>/
+      appcast 中使用的 DMG 下载前缀，默认随当前版本生成。
+      本脚本通过本机 gh 发布 starcat-app/Starcat 的同版本 DMG/SHA256。
+
+  STARCAT_RELEASE_REUSE_ARTIFACTS=1
+      上传失败后复用已完成的 DMG、SHA256、appcast-current.xml，不重新打包或 staple。
+      与 STARCAT_RELEASE_SKIP_TAG=1 配合；已有 GitHub 附件必须与本地产物一致。
 
   STARCAT_RELEASE_BRANCH=main
       允许发布的分支名，默认 main。
@@ -156,7 +161,8 @@ RELEASE_REMOTE="${STARCAT_RELEASE_REMOTE:-origin}"
 RELEASE_HOST="${STARCAT_RELEASE_HOST:-aliyun2}"
 RELEASE_SSH_KEY="${STARCAT_RELEASE_SSH_KEY:-${DEPLOY_SSH_KEY:-}}"
 REMOTE_WEB_DIR="${STARCAT_RELEASE_WEB_DIR:-/var/www/starcat}"
-DOWNLOAD_BASE_URL="${STARCAT_DOWNLOAD_BASE_URL:-https://starcat.ink/downloads/}"
+# 官网与 Sparkle 均读取 appcast；按当前版本固定 Release tag，避免下次发版切回旧下载源。
+DOWNLOAD_BASE_URL="${STARCAT_DOWNLOAD_BASE_URL:-https://github.com/starcat-app/Starcat/releases/download/v${VERSION}/}"
 DRY_RUN="${STARCAT_RELEASE_DRY_RUN:-0}"
 TAG_NAME="v${VERSION}"
 SSH_CMD=(ssh)
@@ -265,6 +271,15 @@ deploy_site() {
 }
 
 package_direct() {
+  if [ "${STARCAT_RELEASE_REUSE_ARTIFACTS:-0}" = "1" ]; then
+    log "复用最终分发产物；上传重试期间不得重新签名或 staple 改变 DMG"
+    if [ "${STARCAT_NOTARIZE:-0}" = "1" ]; then
+      run_or_print xcrun stapler validate "$DMG_PATH"
+      run_or_print spctl --assess --type open --context context:primary-signature --verbose "$DMG_PATH"
+    fi
+    return
+  fi
+
   if [ "${STARCAT_NOTARIZE:-0}" = "1" ]; then
     local submission_id
     submission_id="$(existing_notary_submission_id)"
@@ -392,6 +407,24 @@ verify_local_artifacts() {
   [ -f "$SHA_PATH" ] || fail "未找到 SHA256: $SHA_PATH"
   [ -f "$CURRENT_APPCAST_PATH" ] || fail "未找到当前版本 appcast: $CURRENT_APPCAST_PATH"
 
+  # 复用产物也必须匹配本次下载源和最终 DMG，防止旧清单被带入新的 GitHub 发布。
+  python3 - "$CURRENT_APPCAST_PATH" "$VERSION" "$DOWNLOAD_BASE_URL" "$DMG_PATH" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+path, version, base_url, dmg = sys.argv[1:]
+items = ET.parse(path).findall("./channel/item")
+if len(items) != 1:
+    raise SystemExit("当前版本 appcast 必须恰好包含一个 item")
+enclosure = items[0].find("enclosure")
+expected_url = f"{base_url.rstrip('/')}/Starcat-{version}-arm64.dmg"
+if enclosure is None or enclosure.get("url") != expected_url:
+    raise SystemExit("当前版本 appcast 下载地址与本次发布不一致")
+if enclosure.get("length") != str(Path(dmg).stat().st_size):
+    raise SystemExit("当前版本 appcast 大小与最终 DMG 不一致")
+PY
+
   if ! grep -q "Starcat-${VERSION}-arm64.dmg" "$CURRENT_APPCAST_PATH"; then
     fail "当前版本 appcast 未指向本次 DMG: Starcat-${VERSION}-arm64.dmg"
   fi
@@ -407,21 +440,19 @@ verify_local_artifacts() {
   fi
 }
 
-upload_direct_artifacts() {
-  log "准备远程目录: ${RELEASE_HOST}:${REMOTE_WEB_DIR}/downloads"
-  run_or_print "${SSH_CMD[@]}" "$RELEASE_HOST" "mkdir -p '$REMOTE_WEB_DIR/downloads'"
-
-  log "上传 DMG 和 SHA256"
-  run_or_print rsync -avz --progress \
-    -e "$RSYNC_SSH" \
-    "$DMG_PATH" \
-    "$SHA_PATH" \
-    "$RELEASE_HOST:$REMOTE_WEB_DIR/downloads/"
+publish_github_release() {
+  log "上传并核验 GitHub Release 的 DMG/SHA256"
+  run_or_print python3 "${SCRIPT_DIR}/publish-direct-github-release.py" \
+    --version "$VERSION" \
+    --dmg "$DMG_PATH" \
+    --sha256 "$SHA_PATH" \
+    --changelog "${PROJECT_ROOT}/supports/starcat-pro/CHANGELOG.md"
 }
 
 merge_appcast() {
   [ "$DRY_RUN" = "1" ] && return
 
+  # 本地清单先生成；此时 GitHub 附件尚可不存在，不在这里执行远端校验或上传。
   log "增量合并当前版本 appcast: ${VERSION}"
   python3 "${SCRIPT_DIR}/merge-appcast.py" \
     --base "$APPCAST_PATH" \
@@ -440,15 +471,20 @@ merge_appcast() {
   if ! grep -Eq '<description[^>]*><!\[CDATA\[' "$APPCAST_PATH"; then
     fail "合并后的 appcast 缺少 Sparkle 更新说明（description CDATA）"
   fi
+}
 
+publish_appcast() {
+  # Release 附件已经校验并公开，再让官网和旧客户端看到新版本。
+  verify_public_url "DMG（发布 appcast 前检查）" "${DOWNLOAD_BASE_URL%/}/Starcat-${VERSION}-arm64.dmg"
   log "上传 appcast.xml"
+  run_or_print "${SSH_CMD[@]}" "$RELEASE_HOST" "mkdir -p '$REMOTE_WEB_DIR'"
   run_or_print rsync -avz --progress \
     -e "$RSYNC_SSH" \
     "$APPCAST_PATH" \
     "$RELEASE_HOST:$REMOTE_WEB_DIR/appcast.xml"
 
   log "设置远程文件权限"
-  run_or_print "${SSH_CMD[@]}" "$RELEASE_HOST" "chmod 644 '$REMOTE_WEB_DIR/appcast.xml' '$REMOTE_WEB_DIR/downloads/$(basename "$DMG_PATH")' '$REMOTE_WEB_DIR/downloads/$(basename "$SHA_PATH")'"
+  run_or_print "${SSH_CMD[@]}" "$RELEASE_HOST" "chmod 644 '$REMOTE_WEB_DIR/appcast.xml'"
 }
 
 verify_remote_urls() {
@@ -482,7 +518,7 @@ verify_public_url() {
 
   # 本机网络可能被 TUN / Fake-IP / 代理分流接管，从发布服务器校验可避免本地 TLS 误判。
   printf -v remote_command \
-    'curl -fsSI --connect-timeout 15 --retry 3 --retry-delay 2 --retry-all-errors %q >/dev/null' \
+    'curl -fsSLI --connect-timeout 15 --retry 3 --retry-delay 2 --retry-all-errors %q >/dev/null' \
     "$url"
 
   log "从发布服务器校验线上 ${label}: $url"
@@ -492,6 +528,7 @@ verify_public_url() {
 
 main() {
   require_command git
+  require_command gh
   require_command python3
   require_command rsync
   require_command ssh
@@ -506,12 +543,14 @@ main() {
   require_branch
   require_clean_worktree
   require_notarization_policy
+  run_or_print gh auth status
   create_and_push_tag
-  deploy_site
   package_direct
   verify_local_artifacts
-  upload_direct_artifacts
   merge_appcast
+  publish_github_release
+  deploy_site
+  publish_appcast
   verify_remote_urls
 }
 

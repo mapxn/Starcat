@@ -82,7 +82,7 @@
 - 测试和构建不能证明真实 OAuth、GitHub App、Keychain、通知、RAG 外部 CLI、Sparkle 更新、StoreKit、Creem 或数据库升级体验已经通过。
 - 人工验收必须记录测试设备、来源版本、目标版本、渠道和结果；没有证据时记为 `NOT RUN`。
 - tag、push、GitHub Release、App Store 上传、官网部署和 Direct 上传分别报告，不用一个“已发布”覆盖所有状态。
-- Direct 的 GitHub Release 使用本机 `gh release create` / `gh release upload`，不使用 GitHub Actions。默认上传 notarized DMG 与对应 SHA256；远端 Release 或同名资产已存在时停止，不自动 `--clobber`。
+- Direct 由 `release-direct.sh` 集成本机 GitHub 发布：先生成本地 appcast，上传草稿 DMG/SHA256 并回读校验后公开，最后发布官网 appcast。草稿可补缺失附件；已有附件内容冲突时停止，禁止 `--clobber`。不使用 GitHub Actions，不再向阿里云上传 DMG/SHA256。
 
 ## 6. 发布后版本文档收口
 

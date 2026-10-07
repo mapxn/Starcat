@@ -50,7 +50,7 @@ description: 准备、修复并审计 Starcat macOS App 的 App Store 与 Direct
 4. 四份 Changelog 的版本状态、双语和渠道差异。
 5. 单测、普通构建、脚本静态检查和必要的迁移测试矩阵。
 6. 获得授权后才检查分发产物、签名、公证、Store archive / 本地 export pkg 或 Direct DMG。App Store 正式包必须显式使用 `/Applications/Xcode.app/Contents/Developer` 中的正式版 Xcode；Beta、RC 或 Preview 立即记为 `BLOCKED`。Automatic Signing 的 archive 是中间产物；App Store 最终签名门禁以 `destination=export` 生成并解包验证的 pkg 为准。
-7. Direct 正式发布成功后，获得 GitHub Release 授权才从本机上传 DMG 与 SHA256；不使用 GitHub Actions。
+7. Direct 完整发布授权需包含 GitHub Release：先生成最终 DMG/SHA256 和本地 appcast，再由发布脚本通过本机 gh 上传、回读校验并公开附件，最后发布官网 appcast；不使用 GitHub Actions，也不再向阿里云上传 DMG/SHA256。
 8. 公开版本事实确认后读取 [references/version-document-sync.md](references/version-document-sync.md)，审计并同步全工作区版本文档；不得把历史版本、兼容逻辑或下一待发布版本一起全局替换。
 9. 单独记录人工 UI、真实账户、升级迁移和线上发布验收。
 

@@ -16,7 +16,7 @@
 #   APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD
 #                                     未配置 STARCAT_NOTARY_PROFILE 时的兼容凭证。
 #   STARCAT_GENERATE_APPCAST=1         使用 Sparkle generate_appcast 生成当前版本 appcast。
-#   STARCAT_DOWNLOAD_BASE_URL          appcast 下载前缀，默认 https://starcat.ink/downloads/。
+#   STARCAT_DOWNLOAD_BASE_URL          appcast 下载前缀，默认 GitHub Release 的 v<version>/ 目录。
 #                                     生成后会从 CHANGELOG 注入 Sparkle 更新说明（description）。
 #   STARCAT_DMG_TOOL=create-dmg|hdiutil
 #                                     默认 create-dmg；仅显式设置 hdiutil 时生成裸 DMG。
@@ -477,7 +477,8 @@ fi
 if [ "${STARCAT_GENERATE_APPCAST:-0}" = "1" ]; then
   GENERATE_APPCAST="$(find "$DERIVED_DIR" -path '*/Sparkle/bin/generate_appcast' -type f | head -1)"
   [ -n "$GENERATE_APPCAST" ] || fail "未找到 Sparkle generate_appcast"
-  DOWNLOAD_BASE_URL="${STARCAT_DOWNLOAD_BASE_URL:-https://starcat.ink/downloads/}"
+  # 每次只生成当前版本 item，前缀必须绑定同版本 tag，保证官网与 Sparkle 共用下载源。
+  DOWNLOAD_BASE_URL="${STARCAT_DOWNLOAD_BASE_URL:-https://github.com/starcat-app/Starcat/releases/download/v${VERSION}/}"
   log "生成当前版本 appcast: $CURRENT_APPCAST_PATH"
   # 这里只生成当前版本 item。历史版本由 release-direct.sh 增量合并进
   # supports/starcat-site/direct/appcast.xml，避免发布机必须保存所有旧 DMG。

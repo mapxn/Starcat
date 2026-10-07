@@ -170,13 +170,17 @@ dong4j 当前本机已配置 SSH、Sparkle 公钥、Developer ID 默认签名和
 
 1. 确认当前分支是 `main` 且工作区干净。
 2. 创建并推送 `v1.0.0` annotated tag。
-3. 生成并部署官网 changelog 页面。
-4. 部署 `supports/starcat-site/direct/starcat.ink.conf` 并 reload nginx。
-5. 调用 `scripts/package-direct.sh 1.0.0` 完成本地 Direct 打包。
-6. 生成 Sparkle appcast。
-7. 上传 `supports/starcat-site/direct/appcast.xml` 到 `https://starcat.ink/appcast.xml`。
-8. 上传 DMG / SHA256 到 `https://starcat.ink/downloads/`。
-9. 通过 `STARCAT_RELEASE_HOST` 在发布服务器上执行 `curl -I`，校验线上 appcast、DMG 和 changelog 可访问，避免本机 TUN / Fake-IP / 代理分流造成 TLS 误判。
+3. 调用 `scripts/package-direct.sh 1.0.0` 完成本地 Direct 打包、公证和 staple。
+4. 生成 SHA256、当前版本 appcast，校验后合并本地历史版本。
+5. 创建 GitHub Release 草稿并上传 DMG/SHA256，回读真实附件核验 SHA256 后公开。
+6. 生成并部署官网 changelog、静态页和 nginx。
+7. 确认 GitHub 下载可用后，只向官网上传 appcast；不再向阿里云上传 DMG/SHA256。
+8. 通过 `STARCAT_RELEASE_HOST` 在发布服务器执行 `curl -IL`，校验官网 appcast、GitHub DMG 和 changelog。
+
+完整流程已经集成本机 GitHub CLI，需事先完成 `gh auth login`；不使用 GitHub Actions。
+上传或官网发布中断后，保留最终产物并设置
+`STARCAT_RELEASE_SKIP_TAG=1 STARCAT_RELEASE_REUSE_ARTIFACTS=1` 续跑，不重新打包或 staple。
+草稿仅补缺失附件，已有附件内容冲突则停止，详见《SOP-双渠道签名与发布》§5.3。
 
 如果 `notarytool --wait` 在拿到 Submission ID 后网络超时，先等 Apple 状态变成 `Accepted`，再复用已有 DMG 续跑：
 
@@ -190,7 +194,7 @@ STARCAT_NOTARIZE=1 STARCAT_RELEASE_SKIP_TAG=1 STARCAT_NOTARY_SUBMISSION_ID=<subm
 ```text
 STARCAT_RELEASE_HOST=aliyun
 STARCAT_RELEASE_WEB_DIR=/var/www/starcat
-STARCAT_DOWNLOAD_BASE_URL=https://starcat.ink/downloads/
+STARCAT_DOWNLOAD_BASE_URL=https://github.com/starcat-app/Starcat/releases/download/v<version>/
 ```
 
 演练发布命令，不实际上传：
@@ -218,18 +222,18 @@ STARCAT_RELEASE_SKIP_SITE=1 \
 
 ```bash
 STARCAT_GENERATE_APPCAST=1 \
-STARCAT_DOWNLOAD_BASE_URL="https://starcat.ink/downloads/" \
 ./scripts/package-direct.sh 1.0.0
 ```
 
-本地会生成并覆盖：
+底层打包脚本生成：
 
 ```text
-supports/starcat-site/direct/appcast.xml
-dist/direct/downloads/appcast.xml
+dist/direct/downloads/appcast-current.xml
 dist/direct/downloads/Starcat-1.0.0-arm64.dmg
 dist/direct/downloads/Starcat-1.0.0-arm64.dmg.sha256
 ```
+
+`release-direct.sh` 随后将当前版本清单合并到 `supports/starcat-site/direct/appcast.xml`，仅在 GitHub 附件校验并公开后上传官网。
 
 脚本生成 appcast 时只会把本次 `package-direct.sh` 产出的 DMG 放入临时输入目录。这样可以避免 `dist/direct/downloads/` 中遗留的旧测试包被 Sparkle 扫描进去，造成 `appcast.xml` 同时出现过期版本或未签名版本。
 
@@ -288,7 +292,8 @@ STARCAT_RELEASE_SKIP_TAG=1 ./scripts/release-direct.sh 1.0.1
 确认：
 
 - 使用 `scripts/release-direct.sh` 发布，或单独运行 `package-direct.sh` 时设置 `STARCAT_GENERATE_APPCAST=1`
-- `STARCAT_DOWNLOAD_BASE_URL` 以 `/downloads/` 结尾
+- `STARCAT_DOWNLOAD_BASE_URL` 默认随版本生成 GitHub Release 前缀 `https://github.com/starcat-app/Starcat/releases/download/v<version>/`；显式覆盖时必须指向实际存放同版本 DMG 的目录并以 `/` 结尾
+- GitHub Release 的 DMG 已公开，且与生成 appcast 时签名的文件一致；官网与 Sparkle 均直接使用清单中的 `enclosure.url`
 - DMG 已 notarize/staple 后再生成 appcast
 - nginx 已部署 `supports/starcat-site/direct/starcat.ink.conf` 中 `/appcast.xml` 的 no-cache 规则
 - 测试 / 生产落地页部署方式见 `docs/6-发版与上架/Direct-测试与生产环境隔离.md`

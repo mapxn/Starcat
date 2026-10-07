@@ -11,6 +11,7 @@
 | `scripts/release-store.sh` | 历史 ad-hoc 内测发版入口 | legacy 且默认禁用；需 `STARCAT_ALLOW_LEGACY_RELEASE=1`，不用于正式双渠道发布 |
 | `scripts/package-direct.sh` | Direct 包构建入口 | 构建 `StarcatDirect`，校验 Sparkle 与非沙箱 entitlement，生成 DMG/SHA，可选 notarization/appcast |
 | `scripts/build-dmg.sh` | legacy 内测 DMG 构建入口 | 仅供 `release-store.sh` 历史流程使用，输出到 `build/dmg/` |
+| `scripts/publish-direct-github-release.py` | GitHub 草稿上传、回读 SHA256 校验、公开及安全续跑 | 只上传 DMG/SHA256，不操作官网 appcast |
 | `scripts/merge-appcast.py` | appcast 合并工具 | 把当前版本 appcast item 合并进 `supports/starcat-site/direct/appcast.xml` |
 | `supports/starcat-site/direct/deploy.sh` | 官网/nginx 部署脚本 | 一次完成 nginx 校验/reload 与静态官网同步 |
 | `supports/starcat-site/direct/generate-changelog.py` | 官网 changelog 生成脚本 | 官网部署前生成 `supports/starcat-site/direct/changelog.html` |
@@ -59,15 +60,16 @@ processing 仍由 Xcode Organizer / Transporter 完成。
 3. 除非设置 `STARCAT_RELEASE_SKIP_FETCH=1`，否则先同步远端 tags；
 4. 创建 annotated tag `v<version>`；
 5. 推送 tag 到 `STARCAT_RELEASE_REMOTE`，默认 `origin`；
-6. 使用 `supports/starcat-site/direct/generate-changelog.py` 生成 changelog；
-7. 使用 `supports/starcat-site/direct/deploy.sh` 部署 nginx 配置与静态官网；
-8. 带 `STARCAT_GENERATE_APPCAST=1` 调用 `package-direct.sh`；
-9. 验证本地 DMG/SHA/appcast-current 文件；
-10. 使用 `rsync` 上传 DMG/SHA；
-11. 合并并上传 `supports/starcat-site/direct/appcast.xml`；
-12. 使用 `curl -fsSI` 校验线上 appcast、DMG 和 changelog URL；
-13. 用正式 DMG 的 SHA256 更新 `supports/homebrew-starcat/Casks/starcat.rb`；
-14. 单独提交并推送 Homebrew tap，等待 `Audit Cask` Action 成功。
+6. 带 `STARCAT_GENERATE_APPCAST=1` 调用 `package-direct.sh`；
+7. 校验最终 DMG/SHA/appcast-current 文件，并合并本地 appcast；
+8. 通过本机 `gh` 创建 GitHub 草稿、上传 DMG/SHA256、回读附件验证 SHA256 后公开；
+9. 生成并部署官网 changelog、静态页和 nginx；
+10. 确认 GitHub 下载可用后，只上传官网 appcast；
+11. 跟随重定向校验线上 appcast、GitHub DMG 和 changelog；
+12. 用正式 DMG 的 SHA256 更新 Homebrew Cask，按授权提交并验证 tap。
+
+生成 appcast 不要求远端附件已存在；公布清单要求 GitHub 附件已验证并公开。
+DMG/SHA256 不再通过 rsync 上传阿里云，appcast 更新地址仍为 `https://starcat.ink/appcast.xml`。
 
 重要环境变量：
 
@@ -78,7 +80,8 @@ processing 仍由 Xcode Organizer / Transporter 完成。
 | `STARCAT_RELEASE_HOST` | SSH host，默认 `aliyun2` |
 | `STARCAT_RELEASE_WEB_DIR` | 远程网站根目录，默认 `/var/www/starcat` |
 | `STARCAT_SITE_ROOT` | 独立官网仓库路径，默认 `supports/starcat-site` |
-| `STARCAT_DOWNLOAD_BASE_URL` | DMG URL 前缀，默认 `https://starcat.ink/downloads/` |
+| `STARCAT_DOWNLOAD_BASE_URL` | DMG URL 前缀，默认 `https://github.com/starcat-app/Starcat/releases/download/v<version>/` |
+| `STARCAT_RELEASE_REUSE_ARTIFACTS=1` | 上传失败后复用最终 DMG/SHA/appcast-current，不重新打包或 staple；配合 `STARCAT_RELEASE_SKIP_TAG=1` |
 | `STARCAT_RELEASE_SKIP_TAG=1` | tag 已存在时重跑发布 |
 | `STARCAT_RELEASE_SKIP_NGINX=1` | 跳过 nginx 部署 |
 | `STARCAT_RELEASE_SKIP_SITE=1` | 跳过 changelog 和静态官网部署 |
@@ -92,6 +95,7 @@ processing 仍由 Xcode Organizer / Transporter 完成。
 ```ruby
 version "<X.Y.Z>"
 sha256 "<Starcat-X.Y.Z-arm64.dmg 的真实 SHA256>"
+url "https://github.com/starcat-app/Starcat/releases/download/v#{version.csv.first}/Starcat-#{version.csv.first}-arm64.dmg"
 ```
 
 更新前同时核对：
@@ -162,6 +166,8 @@ Direct 正式发布，也不要用它绕过双渠道签名、公证、上传和�
 | Direct 包带 sandbox entitlement | 停止；Direct 必须非沙箱；检查 target entitlements 和 scheme |
 | notarization 失败 | 检查 notarytool 输出和 Apple 凭证；除非用户明确选择，否则不要上传未 notarize 的公开 DMG |
 | appcast 合并后缺少新 DMG/版本 | 停止；检查 `appcast-current.xml`、`supports/starcat-site/direct/appcast.xml` 和 `merge-appcast.py` |
+| GitHub 上传中断 | 保留本地产物，使用 `STARCAT_RELEASE_SKIP_TAG=1 STARCAT_RELEASE_REUSE_ARTIFACTS=1` 续跑；仅补草稿缺失附件 |
+| GitHub 附件与本地不同 | 停止；不覆盖附件、不公开草稿、不上传 appcast |
 | 线上 URL 校验失败 | 停止；检查上传路径、nginx/site 部署、DNS/TLS 和远程文件权限 |
 | Homebrew Cask 仍是旧版本 | 从正式 DMG/SHA 文件更新 tap；不要只依赖 appcast 的 livecheck |
 | `Audit Cask` 失败 | 停止；修复 Formula/Cask 语法、URL 或 SHA256，不能把 Direct 发布报告为完整成功 |

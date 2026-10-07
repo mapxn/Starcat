@@ -45,38 +45,30 @@ App Store 与 Direct 是独立门禁：
 - 运行任何真实命令前再次确认当前消息授权了对应的 push、tag、打包、公证、部署和上传动作。
 - 一个渠道成功不能代替另一个渠道，也不能代替人工升级、OAuth、支付或线上更新验收。
 
-## 4. 本地创建 Direct GitHub Release
+## 4. Direct GitHub Release 与 appcast 顺序
 
-Direct 脚本成功、远端 tag 已存在、DMG 已公证且线上检查通过后，使用本机 GitHub CLI；不创建或触发 GitHub Actions workflow。
+获得完整发布授权后，统一运行 `release-direct.sh`；GitHub 发布已经集成进脚本，
+不再在 Direct 完成后另行运行 `gh release create`。
 
-先只读检查：
+1. 公证并 staple 最终 DMG，计算 SHA256，生成当前版本 appcast 并合并本地历史。
+2. 通过本机 `gh` 创建 `starcat-app/Starcat` 同版本草稿，上传 DMG/SHA256。
+3. 下载真实附件并验证 SHA256，全部一致才公开 Release；不使用 GitHub Actions。
+4. 部署官网页面，确认 GitHub 下载可用后上传 appcast，最后验证各公开地址。
 
-```bash
-gh auth status
-gh release view "v<X.Y.Z>"
-```
+DMG/SHA256 只上传 GitHub。appcast 仍由 `https://starcat.ink/appcast.xml` 提供，
+避免已发布客户端失去更新入口。appcast 可以先在本地生成，不能在附件就绪前对外公布。
 
-确认 Release 不存在后，从 `supports/starcat-pro/CHANGELOG.md` 提取目标版本英文内容到 `mktemp` 创建的临时文件，再执行：
-
-```bash
-gh release create "v<X.Y.Z>" \
-  "dist/direct/downloads/Starcat-<X.Y.Z>-arm64.dmg" \
-  "dist/direct/downloads/Starcat-<X.Y.Z>-arm64.dmg.sha256" \
-  --verify-tag \
-  --title "Starcat <X.Y.Z>" \
-  --notes-file "<临时发布说明文件>"
-```
-
-完成后验证：
+上传中断后保留最终产物，按已有发布授权续跑：
 
 ```bash
-gh release view "v<X.Y.Z>" \
-  --json tagName,name,isDraft,isPrerelease,url,assets
+STARCAT_NOTARIZE=1 STARCAT_RELEASE_SKIP_TAG=1 STARCAT_RELEASE_REUSE_ARTIFACTS=1 \
+./scripts/release-direct.sh X.Y.Z
 ```
 
-- Release 或同名资产已存在时停止并报告；不要默认使用 `--clobber` 覆盖公开资产。
-- GitHub Release 至少包含 notarized DMG 和 SHA256；不要上传未公证包、DerivedData、日志或含凭据文件。
-- GitHub Release 成功不等于 App Store、官网、Sparkle 或 Homebrew 已完成，最终报告必须逐项列证据。
+- 复用路径不重新打包或 staple；DMG/SHA256/appcast-current 必须完整。
+- 草稿仅补缺失附件；已有附件下载核验一致后复用，禁止 `--clobber`。
+- 已公开且一致的版本只回读；同名内容冲突或已公开版本缺失附件时停止，不继续发布 appcast。
+- Release、官网、Sparkle、Homebrew 和 App Store 状态仍分别报告。
 
 ## 5. 发布后版本文档收口
 
