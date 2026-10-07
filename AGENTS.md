@@ -345,6 +345,13 @@ Section {
 
 ## 跨 Agent 协作规范
 
+### Multica 与 GitHub Issue 同步
+
+- Starcat 主仓库及配套仓库以 Multica 为日常执行入口；每个在办任务必须有唯一的 GitHub 主关联，GitHub 正文同时记录对应 HOM 编号。
+- 验收通过后，在关联 GitHub Issue 记录英文交付证据、按 `completed` 关闭并同步 Project，再把 Multica 设为 `done`；必须回读双方状态。取消对应 `cancelled` / `not planned`，子任务完成不得直接关闭父任务。
+- 任一端更新失败，明确记录“同步待补”，不得宣称双端完成。仅在 Multica 手动切换状态不会自动同步 GitHub；执行者必须完成收尾步骤。
+- 创建、拆分、变更范围及收尾按 [`docs/4-工程进度/任务录入规范.md`](docs/4-工程进度/任务录入规范.md)；当前对应关系见 [`2026-10-07-GitHub与Multica任务对齐.md`](docs/4-工程进度/2026-10-07-GitHub与Multica任务对齐.md)。
+
 ### AI File Wall 协作登记
 
 本仓库启动 `supports/ai-file-wall` 后，Cursor Agent 在首次编辑目标文件前必须调用 MCP 工具 `ai-file-wall.claim_files`，任务结束后调用 `ai-file-wall.release_files`；长任务在 3 分钟内续期一次。Codex 与 Claude Code 由项目 hook 自动登记和释放。该规则只用于显示协作冲突预警，不阻断文件写入。
