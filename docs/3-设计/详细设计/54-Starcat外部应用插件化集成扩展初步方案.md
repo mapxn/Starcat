@@ -1,5 +1,7 @@
 # Starcat 外部应用插件化集成扩展初步方案
 
+> 范围更新（2026-10-07）：#87 的 Shortcuts 动作集与 #86 的跨应用搜索热键不再处理；Spotlight、Alfred、Raycast、uTools、MCP 和其他独立集成保留。 逐项见[任务取消与范围同步](../../4-工程进度/2026-10-07-任务取消与范围同步.md)；本说明优先于下文同范围的旧排期与验收要求。
+
 > 状态：初步方案，待按优先级逐项立项
 >
 > 适用版本：v1.2 及后续版本
@@ -140,7 +142,7 @@ Hammerspoon、Keyboard Maestro、BetterTouchTool 等工具可以执行命令或�
 | 集成目标 | 宿主形态 | 首轮能力 | 调用入口 | 建议优先级 | 主要价值 |
 |----------|----------|----------|----------|------------|----------|
 | Spotlight | macOS 系统搜索 | 索引本地仓库、点击打开详情 | Core Spotlight + Deep Link | P0 | 无需安装第三方 Launcher |
-| Shortcuts | Apple 自动化 | 搜索、打开仓库、获取统计、触发显式操作 | App Intents | P0 | 可组合系统自动化，也能复用给 Widget |
+| Shortcuts | Apple 自动化 | 已取消动作集（#87） | App Intents | ❌ 不再处理 | 可组合系统自动化，也能复用给 Widget |
 | LaunchBar | macOS Launcher | 与 Alfred 对齐的本地 + GitHub 搜索 | `starcat search` | P0 | 复用成本低，覆盖另一类 Launcher 用户 |
 | VS Code | 编辑器 Extension | Quick Pick 搜索、打开仓库、复制链接 | `starcat search` | P1 | 直接进入开发者工作流 |
 | PopClip | 选中文本 Extension | 搜索选中仓库名、打开 Starcat | CLI / Shortcut / URL | P1 | 低打扰的上下文入口 |
@@ -193,6 +195,8 @@ Spotlight 索引由 Starcat 维护，不把数据库路径交给系统。索引 
 GitHub repository ID，避免仓库 rename 后产生重复。
 
 ### 5.2 Shortcuts
+
+> 状态：已取消，以下为历史方案，不再安排实施。
 
 #### 首批 App Intent
 
@@ -451,7 +455,7 @@ GitHub Actions、Release 构建和 supports 同步脚本登记。
 1. 设计统一 `RepositoryAppEntity`。
 2. 实现本地 Spotlight 索引。
 3. 实现首批只读 App Intent。
-4. 实现 App Shortcuts。
+4. ❌ App Shortcuts 动作集已取消（2026-10-07，#87）。
 5. 为 Widget 复用 Entity 和 Intent 模型。
 
 ### 阶段 B：下一个 Launcher

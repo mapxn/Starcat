@@ -17,7 +17,7 @@
 | Tags | ✅ 同步 | 用户创建的标签 |
 | RepoNotes | ✅ 同步 | 用户写的笔记 |
 | RepoStatus | ✅ 同步 | 阅读状态 |
-| SavedSearches | ✅ 同步 | 保存的搜索 |
+| SavedSearches | ❌ 新增同步退出计划 | #74 已取消；保留既有表和数据，不做删除迁移 |
 | SearchHistory | ✅ 同步 | 搜索关键词历史（useCount 走 max 合并，见 §2.6(详见 `docs/6-发版与上架/v1-上架信息准备.md`).1） |
 | ReleaseSubscriptions | ✅ 同步 | Release 订阅设置 |
 | User Preferences | ✅ 同步 | 用户设置 |
@@ -124,6 +124,8 @@ statusRecord["modifiedAt"] = Date()
 ```
 
 ### 2.6 SavedSearch (保存的搜索)
+
+> 状态：2026-10-07 随 #74 取消新增 UI 与同步接入。下列 schema 仅作历史参考，不作为当前 CloudKit 交付门禁；不删除既有数据库表或用户数据。
 
 ```swift
 // CKRecordType: "SavedSearch"
