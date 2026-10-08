@@ -18,6 +18,12 @@ extension GitHubAPIClient {
     ///
     /// GitHub `User.lists` 与 `UserList.items` 都是 connection；这里在 API 层完整翻页，
     /// 上层同步服务只处理一个完整快照，避免把分页细节泄漏到业务层。
+    ///
+    /// 注意：不要把 `items` 嵌在 lists 查询里一次性拉取。实测当用户 lists 较多、
+    /// 每个 list 下 item 较多时（例如 24 个 lists / 近千个 memberships），这种嵌套写法
+    /// 会让 GitHub GraphQL 后端超时，直接回 502，而 App 侧除了报错什么也做不了。
+    /// 因此这里先只拉 lists 元数据，再逐个 list 翻页拉 items：请求变多了，
+    /// 但每个都很轻，不会触发 502。
     func starLists(login: String) async throws -> GitHubStarListRemoteSnapshot {
         var lists: [GitHubStarListRemoteRecord] = []
         var memberships: [GitHubStarListRemoteMembership] = []
@@ -29,11 +35,11 @@ extension GitHubAPIClient {
             let page = try await starListPage(login: login, after: listAfter)
             for node in page.user?.lists.nodes ?? [] {
                 lists.append(node.remoteRecord(position: position))
-                memberships.append(contentsOf: node.memberships)
                 position += 1
 
-                var itemAfter = node.items?.pageInfo.endCursor
-                var hasMoreItems = node.items?.pageInfo.hasNextPage ?? false
+                // 逐个 list 翻页拉 items（原因见本函数 doc comment：不要嵌套一次拉）。
+                var itemAfter: String? = nil
+                var hasMoreItems = true
                 while hasMoreItems {
                     let itemPage = try await starListItems(listId: node.id, after: itemAfter)
                     memberships.append(contentsOf: itemPage.node?.memberships ?? [])
@@ -233,19 +239,6 @@ extension GitHubAPIClient {
                 isPrivate
                 createdAt
                 updatedAt
-                items(first: 100) {
-                  nodes {
-                    ... on Repository {
-                      id
-                      owner { login }
-                      name
-                    }
-                  }
-                  pageInfo {
-                    hasNextPage
-                    endCursor
-                  }
-                }
               }
               pageInfo {
                 hasNextPage
@@ -338,15 +331,6 @@ private struct ListNode: Decodable {
             createdAt: createdAt,
             updatedAt: updatedAt
         )
-    }
-
-    var memberships: [GitHubStarListRemoteMembership] {
-        (items?.nodes ?? []).map {
-            GitHubStarListRemoteMembership(
-                listId: id,
-                repoFullName: "\($0.owner.login)/\($0.name)"
-            )
-        }
     }
 }
 
